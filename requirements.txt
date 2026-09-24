@@ -1,0 +1,4 @@
+# PyVault USB - Dependências
+# O sistema foi projetado para funcionar 100% com a BIBLIOTECA PADRÃO do Python!
+# Caso deseje aceleração criptográfica por hardware (AES-NI), instale a biblioteca abaixo:
+cryptography>=41.0.0
