@@ -9,21 +9,30 @@ from typing import Optional, Dict, Any
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QTextEdit, QPushButton, QCheckBox, QSlider, QFrame, QMessageBox, QApplication
+    QTextEdit, QPushButton, QCheckBox, QSlider, QFrame, QMessageBox
 )
 
 from ..password_generator import PasswordGenerator, GeneratorOptions
+from .clipboard import ClipboardAutoClear
 
 
 class CredentialDialog(QDialog):
     """Dialog for creating or updating a credential entry."""
 
-    def __init__(self, parent=None, existing_credential: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        parent=None,
+        existing_credential: Optional[Dict[str, Any]] = None,
+        clipboard_auto_clear: Optional[ClipboardAutoClear] = None,
+    ):
         super().__init__(parent)
         self.existing_credential = existing_credential
+        self.clipboard_auto_clear = clipboard_auto_clear or ClipboardAutoClear(self)
         self.setWindowTitle("Edit Credential" if existing_credential else "New Credential")
         self.setMinimumWidth(500)
         self._init_ui()
+        self.clipboard_auto_clear.copied.connect(self._on_password_copied)
+        self.clipboard_auto_clear.timer_finished.connect(self._on_clipboard_timer_finished)
 
         if existing_credential:
             self._populate_fields(existing_credential)
@@ -213,7 +222,13 @@ class CredentialDialog(QDialog):
             self.toggle_pw_btn.setText("Show")
 
     def _copy_password(self):
-        QApplication.clipboard().setText(self.password_input.text())
+        self.clipboard_auto_clear.copy_password(self.password_input.text())
+
+    def _on_password_copied(self):
+        self.copy_pw_btn.setText("Copied (30s)")
+
+    def _on_clipboard_timer_finished(self):
+        self.copy_pw_btn.setText("Copy")
 
     def _on_password_changed(self, text: str):
         analysis = PasswordGenerator.estimate_strength(text)

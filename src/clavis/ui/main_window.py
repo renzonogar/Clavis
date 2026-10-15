@@ -24,7 +24,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Clavis — Offline-First Encrypted Vault")
-        self.resize(1000, 680)
+        self.resize(900, 600)
         self.setMinimumSize(800, 550)
 
         # Global Dark Styling
@@ -235,11 +235,15 @@ class MainWindow(QMainWindow):
             elif ans == QMessageBox.StandardButton.Cancel:
                 return
 
+        if self.vault_view:
+            self.vault_view.clear_sensitive_clipboard()
         self.vault.lock()
         self.welcome_view.refresh_drives()
         self.stack.setCurrentIndex(0)
 
     def _on_session_auto_locked(self):
+        if self.vault_view:
+            self.vault_view.clear_sensitive_clipboard()
         self.welcome_view.refresh_drives()
         self.stack.setCurrentIndex(0)
 
@@ -264,5 +268,7 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
 
+        if self.vault_view:
+            self.vault_view.clear_sensitive_clipboard()
         self.vault.lock()
         event.accept()

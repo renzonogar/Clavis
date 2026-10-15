@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import math
 import secrets
 import string
-from typing import Dict, Any, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Tuple
 
 LOWERCASE_CHARS = string.ascii_lowercase
 UPPERCASE_CHARS = string.ascii_uppercase
@@ -31,6 +31,13 @@ class GeneratorOptions:
             raise ValueError("Password length must be between 8 and 128 characters.")
         if not any([self.use_lowercase, self.use_uppercase, self.use_digits, self.use_symbols]):
             raise ValueError("At least one character set must be enabled.")
+
+
+@dataclass(frozen=True)
+class PasswordHealthFinding:
+    credential_id: str
+    title: str
+    issues: Tuple[str, ...]
 
 
 class PasswordGenerator:
@@ -173,3 +180,37 @@ class PasswordGenerator:
             "A high score does NOT guarantee security if the password appears in breach databases, "
             "is reused across services, or is intercepted by keyloggers on a compromised host."
         )
+
+
+def analyze_password_health(
+    credentials: Iterable[Mapping[str, Any]]
+) -> List[PasswordHealthFinding]:
+    active_credentials = [
+        credential for credential in credentials
+        if not credential.get("is_deleted", False)
+    ]
+    password_counts: Dict[str, int] = {}
+    for credential in active_credentials:
+        password = credential["password"]
+        password_counts[password] = password_counts.get(password, 0) + 1
+
+    findings = []
+    for credential in active_credentials:
+        password = credential["password"]
+        analysis = PasswordGenerator.estimate_strength(password)
+        issues = []
+        if analysis["score"] < 2:
+            issues.append(f"Weak password (rating: {analysis['label']})")
+        elif analysis["score"] == 2:
+            issues.append("Could be stronger (rating: Fair)")
+        if password_counts[password] > 1:
+            issues.append("Reused password")
+        if issues:
+            findings.append(
+                PasswordHealthFinding(
+                    credential_id=credential["id"],
+                    title=credential["title"],
+                    issues=tuple(issues),
+                )
+            )
+    return findings

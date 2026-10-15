@@ -20,7 +20,8 @@ from clavis.password_generator import (
     LOWERCASE_CHARS,
     UPPERCASE_CHARS,
     DIGIT_CHARS,
-    SYMBOL_CHARS
+    SYMBOL_CHARS,
+    analyze_password_health,
 )
 
 
@@ -88,3 +89,30 @@ def test_strength_estimator_heuristics():
     assert res_strong["score"] >= 3
     assert res_strong["entropy_bits"] > 70
     assert "disclaimer" in res_strong
+
+
+def test_password_health_flags_weak_and_reused_but_not_deleted_credentials():
+    findings = analyze_password_health([
+        {"id": "weak", "title": "Weak entry", "password": "12345678"},
+        {"id": "reuse-1", "title": "First account", "password": "Strong#Password928!"},
+        {"id": "reuse-2", "title": "Second account", "password": "Strong#Password928!"},
+        {
+            "id": "deleted",
+            "title": "Deleted entry",
+            "password": "12345678",
+            "is_deleted": True,
+        },
+        {"id": "healthy", "title": "Healthy entry", "password": "jK9#mQ2$xP8!vL5@zR1&wT4*"},
+    ])
+
+    findings_by_id = {finding.credential_id: finding for finding in findings}
+    assert set(findings_by_id) == {"weak", "reuse-1", "reuse-2"}
+    assert any("Weak password" in issue for issue in findings_by_id["weak"].issues)
+    assert all(
+        "Reused password" in findings_by_id[credential_id].issues
+        for credential_id in ("reuse-1", "reuse-2")
+    )
+    assert all(
+        "Strong#Password928!" not in finding.title
+        for finding in findings
+    )

@@ -14,7 +14,9 @@ from PySide6.QtWidgets import (
     QSplitter, QFrame, QMessageBox, QSizePolicy
 )
 
+from ..password_generator import analyze_password_health
 from ..vault import ClavisVault
+from .clipboard import ClipboardAutoClear
 from .credential_dialog import CredentialDialog
 from .settings_view import SettingsView
 
@@ -30,6 +32,9 @@ class VaultView(QWidget):
         self.vault = vault
         self.current_selected_id: Optional[str] = None
         self.showing_deleted: bool = False
+        self.clipboard_auto_clear = ClipboardAutoClear(self)
+        self.clipboard_auto_clear.copied.connect(self._on_password_copied)
+        self.clipboard_auto_clear.timer_finished.connect(self._on_clipboard_timer_finished)
         self._init_ui()
         self.refresh_list()
 
@@ -68,6 +73,11 @@ class VaultView(QWidget):
         self.lock_btn.setStyleSheet("background-color: #991b1b; color: white; border: none; padding: 6px 14px; border-radius: 6px; font-weight: 600; margin-left: 8px;")
         self.lock_btn.clicked.connect(self.lock_requested.emit)
         top_layout.addWidget(self.lock_btn)
+
+        self.health_btn = QPushButton("Password Health")
+        self.health_btn.setStyleSheet("background-color: #262933; color: #e5e7eb; border: 1px solid #374151; padding: 6px 12px; border-radius: 6px;")
+        self.health_btn.clicked.connect(self._show_password_health)
+        top_layout.addWidget(self.health_btn)
 
         main_layout.addWidget(top_bar)
 
@@ -165,6 +175,9 @@ class VaultView(QWidget):
         self.settings_view = SettingsView(self.vault)
         self.main_stack.addWidget(self.settings_view)
 
+        self.password_health_view = self._build_password_health_widget()
+        self.main_stack.addWidget(self.password_health_view)
+
         splitter.addWidget(self.main_stack)
         splitter.setStretchFactor(1, 1)
 
@@ -250,13 +263,13 @@ class VaultView(QWidget):
         self.toggle_reveal_btn.setStyleSheet("background-color: #262933; color: #9ca3af; border: 1px solid #374151; padding: 4px 10px; border-radius: 4px;")
         self.toggle_reveal_btn.clicked.connect(self._toggle_password_reveal)
 
-        copy_p_btn = QPushButton("Copy")
-        copy_p_btn.setStyleSheet("background-color: #4f46e5; color: white; border: none; padding: 4px 12px; border-radius: 4px; font-weight: 600;")
-        copy_p_btn.clicked.connect(self._copy_password)
+        self.copy_password_btn = QPushButton("Copy")
+        self.copy_password_btn.setStyleSheet("background-color: #4f46e5; color: white; border: none; padding: 4px 12px; border-radius: 4px; font-weight: 600;")
+        self.copy_password_btn.clicked.connect(self._copy_password)
 
         p_row.addWidget(self.detail_password, 1)
         p_row.addWidget(self.toggle_reveal_btn)
-        p_row.addWidget(copy_p_btn)
+        p_row.addWidget(self.copy_password_btn)
         fc_layout.addLayout(p_row)
 
         # URL Row
@@ -296,6 +309,42 @@ class VaultView(QWidget):
         layout.addWidget(self.detail_container)
         self.detail_container.hide()
 
+        return widget
+
+    def _build_password_health_widget(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(32, 32, 32, 32)
+        layout.setSpacing(12)
+
+        title = QLabel("Password Health")
+        title.setStyleSheet("color: #f9fafb; font-size: 22px; font-weight: 700;")
+        layout.addWidget(title)
+
+        description = QLabel(
+            "Checks active credentials for weak or reused passwords. "
+            "Analysis happens locally and does not check breach databases."
+        )
+        description.setWordWrap(True)
+        description.setStyleSheet("color: #9ca3af; font-size: 13px;")
+        layout.addWidget(description)
+
+        self.health_scan_btn = QPushButton("Scan Vault")
+        self.health_scan_btn.setStyleSheet("background-color: #4f46e5; color: white; border: none; padding: 8px 14px; border-radius: 6px; font-weight: 600;")
+        self.health_scan_btn.clicked.connect(self._run_password_health_check)
+        layout.addWidget(self.health_scan_btn, 0, Qt.AlignmentFlag.AlignLeft)
+
+        self.health_summary_label = QLabel("Run a scan to review your vault.")
+        self.health_summary_label.setStyleSheet("color: #d1d5db; font-size: 14px; font-weight: 600;")
+        layout.addWidget(self.health_summary_label)
+
+        self.health_results = QListWidget()
+        self.health_results.setStyleSheet(
+            "background-color: #121316; border: 1px solid #2a2d39; "
+            "border-radius: 6px; color: #e5e7eb; padding: 4px;"
+        )
+        self.health_results.itemClicked.connect(self._open_health_finding)
+        layout.addWidget(self.health_results)
         return widget
 
     def refresh_list(self):
@@ -341,6 +390,7 @@ class VaultView(QWidget):
         self._pw_revealed = False
         self.detail_password.setText("••••••••••••••••")
         self.toggle_reveal_btn.setText("Reveal")
+        self.copy_password_btn.setText("Copy")
 
         self.detail_url.setText(cred.get("url") or "None")
         self.detail_notes.setText(cred.get("notes") or "No notes recorded.")
@@ -378,8 +428,16 @@ class VaultView(QWidget):
             self._pw_revealed = True
 
     def _copy_password(self):
-        if self._raw_password:
-            QGuiApplication.clipboard().setText(self._raw_password)
+        self.clipboard_auto_clear.copy_password(self._raw_password)
+
+    def _on_password_copied(self):
+        self.copy_password_btn.setText("Copied (30s)")
+
+    def _on_clipboard_timer_finished(self):
+        self.copy_password_btn.setText("Copy")
+
+    def clear_sensitive_clipboard(self):
+        self.clipboard_auto_clear.clear_if_unchanged()
 
     def _copy_username(self):
         if self.detail_username.text():
@@ -388,7 +446,7 @@ class VaultView(QWidget):
     def _on_add_credential(self):
         if not self.vault.db:
             return
-        dlg = CredentialDialog(self)
+        dlg = CredentialDialog(self, clipboard_auto_clear=self.clipboard_auto_clear)
         if dlg.exec():
             data = dlg.get_data()
             new_id = self.vault.db.add_credential(**data)
@@ -404,7 +462,11 @@ class VaultView(QWidget):
         if not cred:
             return
 
-        dlg = CredentialDialog(self, existing_credential=cred)
+        dlg = CredentialDialog(
+            self,
+            existing_credential=cred,
+            clipboard_auto_clear=self.clipboard_auto_clear,
+        )
         if dlg.exec():
             data = dlg.get_data()
             self.vault.db.update_credential(self.current_selected_id, **data)
@@ -508,3 +570,46 @@ class VaultView(QWidget):
         self.nav_all_btn.setStyleSheet("background-color: #262933; color: #9ca3af; border: 1px solid #374151; padding: 6px 12px; border-radius: 6px;")
         self.nav_trash_btn.setStyleSheet("background-color: #262933; color: #9ca3af; border: 1px solid #374151; padding: 6px 12px; border-radius: 6px;")
         self.main_stack.setCurrentIndex(1)
+
+    def _show_password_health(self):
+        self.main_stack.setCurrentWidget(self.password_health_view)
+        self._run_password_health_check()
+
+    def _run_password_health_check(self):
+        if not self.vault.db:
+            return
+
+        credentials = self.vault.db.list_credentials(include_deleted=False)
+        findings = analyze_password_health(credentials)
+        self.health_results.clear()
+
+        if not credentials:
+            self.health_summary_label.setText("No active credentials to scan.")
+            return
+        if not findings:
+            self.health_summary_label.setText(
+                "No weak or reused passwords found in the active credentials."
+            )
+            return
+
+        self.health_summary_label.setText(
+            f"{len(findings)} credential(s) need attention. "
+            "Select an item to open it."
+        )
+        for finding in findings:
+            item = QListWidgetItem(
+                f"{finding.title}\n" + " · ".join(finding.issues)
+            )
+            item.setData(Qt.ItemDataRole.UserRole, finding.credential_id)
+            self.health_results.addItem(item)
+
+    def _open_health_finding(self, item: QListWidgetItem):
+        cred_id = item.data(Qt.ItemDataRole.UserRole)
+        self.search_input.clear()
+        self._show_credentials_tab()
+        for index in range(self.cred_list.count()):
+            credential_item = self.cred_list.item(index)
+            if credential_item.data(Qt.ItemDataRole.UserRole) == cred_id:
+                self.cred_list.setCurrentItem(credential_item)
+                break
+        self._load_credential_detail(cred_id)

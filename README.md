@@ -111,6 +111,8 @@ python3 main.py
 - **Trash & Soft Delete:** Deleted credentials move to the Trash section. They can be restored or permanently purged.
 - **Password Generator (CSPRNG):** Cryptographically secure generator (`secrets`) with configurable lengths (8–128), uppercase, lowercase, numbers, symbols, and ambiguous character filtering.
 - **Entropy & Strength Estimator:** Shannon entropy calculation with heuristic penalty for repetition. Includes an explicit disclaimer that entropy scores do not guarantee safety against targeted dictionary attacks.
+- **Password Health Check:** Scans active vault credentials locally for weak and reused passwords. It does not contact breach databases or any network service.
+- **Clipboard Auto-Clear:** Passwords copied from the vault or credential editor are cleared after 30 seconds if the clipboard still contains the copied password. Copying something else first is left untouched.
 - **Configurable Inactivity Auto-Lock:** Automatically locks after 1, 5, 15, or 30 minutes of inactivity.
 
 ---
