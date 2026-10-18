@@ -4,7 +4,10 @@ Allows the user to select a connected USB drive, create a new vault, or open an 
 """
 
 import os
+from pathlib import Path
+
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QFileDialog, QFrame
@@ -93,24 +96,32 @@ class WelcomeView(QWidget):
         card_layout.setSpacing(16)
         card.setFixedWidth(520)
 
-        # Header with Logo and Offline Badge
-        header_row = QHBoxLayout()
-        title_box = QVBoxLayout()
-        title = QLabel("CLAVIS")
-        title.setProperty("class", "title")
+        logo_path = Path(__file__).resolve().parents[3] / "assets" / "ClavisLogoHQpng.png"
+        logo_pixmap = QPixmap(str(logo_path))
+        if logo_pixmap.isNull():
+            raise RuntimeError(f"Unable to load Clavis logo: {logo_path}")
+
+        title = QLabel()
+        title.setPixmap(logo_pixmap.scaled(
+            400,
+            174,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        ))
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
         tagline = QLabel("Your vault. Your device. Your control.")
         tagline.setProperty("class", "tagline")
-        title_box.addWidget(title)
-        title_box.addWidget(tagline)
+        tagline.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         badge = QLabel("OFFLINE ONLY")
         badge.setProperty("class", "offline_badge")
         badge.setFixedHeight(26)
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        header_row.addLayout(title_box)
-        header_row.addStretch()
-        header_row.addWidget(badge)
-        card_layout.addLayout(header_row)
+        card_layout.addWidget(title)
+        card_layout.addWidget(tagline)
+        card_layout.addWidget(badge, alignment=Qt.AlignmentFlag.AlignCenter)
 
         desc = QLabel(
             "Clavis is a portable, offline-first password manager designed to keep "
