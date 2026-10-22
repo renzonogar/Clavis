@@ -23,7 +23,7 @@ def main():
 
         app = QApplication(sys.argv)
         app.setApplicationName("Clavis")
-        app.setApplicationDisplayName("Clavis — Offline-First Encrypted Vault")
+        app.setApplicationDisplayName("Clavis")
 
         # Set default font
         font = QFont("Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif", 10)

@@ -7,9 +7,11 @@ secure password generator and real-time strength estimation.
 from typing import Optional, Dict, Any
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QTextEdit, QPushButton, QCheckBox, QSlider, QFrame, QMessageBox
+    QTextEdit, QPushButton, QCheckBox, QSlider, QFrame, QMessageBox,
+    QScrollArea, QWidget
 )
 
 from ..password_generator import PasswordGenerator, GeneratorOptions
@@ -31,6 +33,7 @@ class CredentialDialog(QDialog):
         self.setWindowTitle("Edit Credential" if existing_credential else "New Credential")
         self.setMinimumWidth(500)
         self._init_ui()
+        self._fit_available_screen()
         self.clipboard_auto_clear.copied.connect(self._on_password_copied)
         self.clipboard_auto_clear.timer_finished.connect(self._on_clipboard_timer_finished)
 
@@ -39,8 +42,8 @@ class CredentialDialog(QDialog):
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(14)
-        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(8)
+        layout.setContentsMargins(16, 16, 16, 16)
 
         self.setStyleSheet("""
             QDialog {
@@ -87,20 +90,38 @@ class CredentialDialog(QDialog):
             }
         """)
 
+        form = QWidget()
+        form.setObjectName("credentialForm")
+        form.setStyleSheet("background-color: #1a1c23;")
+        form.setAutoFillBackground(True)
+        form_layout = QVBoxLayout(form)
+        form_layout.setSpacing(10)
+        form_layout.setContentsMargins(4, 4, 4, 4)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setStyleSheet(
+            "QScrollArea { background-color: #1a1c23; border: none; }"
+        )
+        scroll_area.viewport().setStyleSheet("background-color: #1a1c23;")
+        scroll_area.setWidget(form)
+        layout.addWidget(scroll_area, 1)
+
         # Title
-        layout.addWidget(QLabel("Title / Service Name *"))
+        form_layout.addWidget(QLabel("Title / Service Name *"))
         self.title_input = QLineEdit()
         self.title_input.setPlaceholderText("e.g. GitHub, ProtonMail, Bank")
-        layout.addWidget(self.title_input)
+        form_layout.addWidget(self.title_input)
 
         # Username
-        layout.addWidget(QLabel("Username / Email *"))
+        form_layout.addWidget(QLabel("Username / Email *"))
         self.username_input = QLineEdit()
         self.username_input.setPlaceholderText("e.g. user@example.com")
-        layout.addWidget(self.username_input)
+        form_layout.addWidget(self.username_input)
 
         # Password Row
-        layout.addWidget(QLabel("Password *"))
+        form_layout.addWidget(QLabel("Password *"))
         pw_row = QHBoxLayout()
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
@@ -119,12 +140,12 @@ class CredentialDialog(QDialog):
         pw_row.addWidget(self.password_input, 1)
         pw_row.addWidget(self.toggle_pw_btn)
         pw_row.addWidget(self.copy_pw_btn)
-        layout.addLayout(pw_row)
+        form_layout.addLayout(pw_row)
 
         # Strength Bar & Feedback
         self.strength_label = QLabel("Strength: Empty")
         self.strength_label.setStyleSheet("color: #9ca3af; font-size: 11px;")
-        layout.addWidget(self.strength_label)
+        form_layout.addWidget(self.strength_label)
 
         # Generator Accordion / Frame
         gen_box = QFrame()
@@ -175,20 +196,20 @@ class CredentialDialog(QDialog):
         opts_row.addWidget(self.chk_ambiguous)
         gen_layout.addLayout(opts_row)
 
-        layout.addWidget(gen_box)
+        form_layout.addWidget(gen_box)
 
         # URL
-        layout.addWidget(QLabel("Website URL (Optional)"))
+        form_layout.addWidget(QLabel("Website URL (Optional)"))
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("https://...")
-        layout.addWidget(self.url_input)
+        form_layout.addWidget(self.url_input)
 
         # Notes
-        layout.addWidget(QLabel("Notes (Optional)"))
+        form_layout.addWidget(QLabel("Notes (Optional)"))
         self.notes_input = QTextEdit()
         self.notes_input.setMaximumHeight(80)
         self.notes_input.setPlaceholderText("Recovery codes, security questions, notes...")
-        layout.addWidget(self.notes_input)
+        form_layout.addWidget(self.notes_input)
 
         # Buttons
         btn_row = QHBoxLayout()
@@ -204,6 +225,21 @@ class CredentialDialog(QDialog):
         btn_row.addWidget(self.cancel_btn)
         btn_row.addWidget(self.save_btn)
         layout.addLayout(btn_row)
+
+    def _fit_available_screen(self):
+        screen = self.parentWidget().screen() if self.parentWidget() else None
+        if screen is None:
+            screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+
+        available = screen.availableGeometry()
+        max_width = max(self.minimumWidth(), available.width() - 48)
+        max_height = max(320, available.height() - 48)
+        self.resize(
+            min(max(self.sizeHint().width(), self.minimumWidth()), max_width),
+            min(self.sizeHint().height(), max_height),
+        )
 
     def _populate_fields(self, cred: Dict[str, Any]):
         self.title_input.setText(cred.get("title", ""))
@@ -243,7 +279,7 @@ class CredentialDialog(QDialog):
         color = colors.get(analysis["label"], "#9ca3af")
         self.strength_label.setText(
             f"Strength: <b style='color: {color}'>{analysis['label']}</b> "
-            f"({analysis['entropy_bits']} bits entropy) — {analysis['feedback']}"
+            f"({analysis['entropy_bits']} bits entropy)"
         )
 
     def _generate_password(self):

@@ -38,15 +38,6 @@ class WelcomeView(QWidget):
             color: #9ca3af;
             font-size: 13px;
         }
-        QLabel.offline_badge {
-            background-color: #064e3b;
-            color: #34d399;
-            border: 1px solid #059669;
-            border-radius: 4px;
-            padding: 4px 10px;
-            font-size: 11px;
-            font-weight: 600;
-        }
         QComboBox {
             background-color: #121316;
             color: #e5e7eb;
@@ -114,14 +105,9 @@ class WelcomeView(QWidget):
         tagline.setProperty("class", "tagline")
         tagline.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        badge = QLabel("OFFLINE ONLY")
-        badge.setProperty("class", "offline_badge")
-        badge.setFixedHeight(26)
-        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         card_layout.addWidget(title)
         card_layout.addWidget(tagline)
-        card_layout.addWidget(badge, alignment=Qt.AlignmentFlag.AlignCenter)
 
         desc = QLabel(
             "Clavis is a portable, offline-first password manager designed to keep "

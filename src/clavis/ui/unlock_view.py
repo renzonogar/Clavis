@@ -29,13 +29,12 @@ class UnlockView(QWidget):
         layout.setContentsMargins(40, 40, 40, 40)
 
         card = QFrame()
-        card.setFixedWidth(480)
+        card.setFixedWidth(520)
         card.setStyleSheet("""
             QFrame {
                 background-color: #1a1c23;
                 border: 1px solid #2a2d39;
                 border-radius: 8px;
-                padding: 24px;
             }
             QLabel {
                 color: #e5e7eb;
@@ -72,13 +71,18 @@ class UnlockView(QWidget):
         """)
 
         card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(20, 20, 20, 20)
         card_layout.setSpacing(14)
 
         self.title_label = QLabel("Unlock Clavis Vault")
-        self.title_label.setStyleSheet("font-size: 20px; font-weight: 700; color: #f9fafb;")
+        self.title_label.setWordWrap(True)
+        self.title_label.setStyleSheet(
+            "font-size: 18px; font-weight: 700; color: #f9fafb;"
+        )
         card_layout.addWidget(self.title_label)
 
         self.path_label = QLabel("")
+        self.path_label.setWordWrap(True)
         self.path_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
         card_layout.addWidget(self.path_label)
 
