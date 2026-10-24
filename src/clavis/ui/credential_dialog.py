@@ -6,12 +6,12 @@ secure password generator and real-time strength estimation.
 
 from typing import Optional, Dict, Any
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEasingCurve, Qt, QParallelAnimationGroup, QPropertyAnimation, QRect
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QTextEdit, QPushButton, QCheckBox, QSlider, QFrame, QMessageBox,
-    QScrollArea, QWidget
+    QScrollArea, QWidget, QGraphicsOpacityEffect
 )
 
 from ..password_generator import PasswordGenerator, GeneratorOptions
@@ -30,7 +30,20 @@ class CredentialDialog(QDialog):
         super().__init__(parent)
         self.existing_credential = existing_credential
         self.clipboard_auto_clear = clipboard_auto_clear or ClipboardAutoClear(self)
-        self.setWindowTitle("Edit Credential" if existing_credential else "New Credential")
+        is_editing = existing_credential is not None
+        self.setWindowTitle("Edit Credential" if is_editing else "New Credential")
+        self._animation_group: Optional[QParallelAnimationGroup] = None
+        if is_editing:
+            self.setModal(True)
+            self.setWindowFlags(
+                Qt.WindowType.Dialog
+                | Qt.WindowType.CustomizeWindowHint
+                | Qt.WindowType.FramelessWindowHint
+            )
+            self._opacity_effect = QGraphicsOpacityEffect(self)
+            self._opacity_effect.setOpacity(1.0)
+            self.setGraphicsEffect(self._opacity_effect)
+
         self.setMinimumWidth(500)
         self._init_ui()
         self._fit_available_screen()
@@ -39,6 +52,44 @@ class CredentialDialog(QDialog):
 
         if existing_credential:
             self._populate_fields(existing_credential)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self.existing_credential is None:
+            return
+
+        final_geometry = self.geometry()
+        parent = self.parentWidget()
+        if parent is not None:
+            center = parent.mapToGlobal(parent.rect().center())
+        else:
+            screen = QGuiApplication.primaryScreen()
+            if screen is None:
+                return
+            center = screen.availableGeometry().center()
+        final_geometry.moveCenter(center)
+
+        initial_geometry = QRect(final_geometry)
+        initial_geometry.adjust(10, 5, -10, -5)
+        self.setGeometry(initial_geometry)
+        self._opacity_effect.setOpacity(0.0)
+
+        zoom = QPropertyAnimation(self, b"geometry", self)
+        zoom.setDuration(180)
+        zoom.setStartValue(initial_geometry)
+        zoom.setEndValue(final_geometry)
+        zoom.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        fade = QPropertyAnimation(self._opacity_effect, b"opacity", self)
+        fade.setDuration(180)
+        fade.setStartValue(0.0)
+        fade.setEndValue(1.0)
+        fade.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        self._animation_group = QParallelAnimationGroup(self)
+        self._animation_group.addAnimation(zoom)
+        self._animation_group.addAnimation(fade)
+        self._animation_group.start()
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -49,6 +100,8 @@ class CredentialDialog(QDialog):
             QDialog {
                 background-color: #1a1c23;
                 color: #e5e7eb;
+                border: 2px solid #4a4a4a;
+                border-radius: 12px;
             }
             QLabel {
                 color: #d1d5db;

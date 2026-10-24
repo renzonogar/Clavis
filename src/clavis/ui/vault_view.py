@@ -18,6 +18,7 @@ from ..password_generator import analyze_password_health
 from ..vault import ClavisVault
 from .clipboard import ClipboardAutoClear
 from .credential_dialog import CredentialDialog
+from .icons import load_icon
 from .settings_view import SettingsView
 
 
@@ -180,6 +181,8 @@ class VaultView(QWidget):
             "background-color: #262933; color: #e5e7eb; border: 1px solid "
             "#374151; border-radius: 6px; padding: 8px 12px;"
         )
+        self.view_mode_btn.setIcon(load_icon("gridview.svg"))
+        self.view_mode_btn.setIconSize(QSize(18, 18))
         self.view_mode_btn.setCheckable(True)
         self.view_mode_btn.toggled.connect(self._toggle_credential_view)
         header_row.addWidget(self.view_mode_btn)
@@ -266,10 +269,14 @@ class VaultView(QWidget):
         head_row.addStretch()
 
         self.edit_btn = QPushButton("Edit")
+        self.edit_btn.setIcon(load_icon("edit.svg"))
+        self.edit_btn.setIconSize(QSize(18, 18))
         self.edit_btn.setStyleSheet("background-color: #262933; color: #e5e7eb; border: 1px solid #374151; padding: 6px 14px; border-radius: 6px;")
         self.edit_btn.clicked.connect(self._on_edit_credential)
 
         self.delete_btn = QPushButton("Delete")
+        self.delete_btn.setIcon(load_icon("delete.svg"))
+        self.delete_btn.setIconSize(QSize(18, 18))
         self.delete_btn.setStyleSheet("background-color: #7f1d1d; color: #fca5a5; border: 1px solid #991b1b; padding: 6px 14px; border-radius: 6px;")
         self.delete_btn.clicked.connect(self._on_delete_credential)
 
@@ -317,6 +324,8 @@ class VaultView(QWidget):
         self._pw_revealed = False
 
         self.toggle_reveal_btn = QPushButton("Reveal")
+        self.toggle_reveal_btn.setIcon(load_icon("reveal_on.svg"))
+        self.toggle_reveal_btn.setIconSize(QSize(18, 18))
         self.toggle_reveal_btn.setStyleSheet("background-color: #262933; color: #9ca3af; border: 1px solid #374151; padding: 4px 10px; border-radius: 4px;")
         self.toggle_reveal_btn.clicked.connect(self._toggle_password_reveal)
 
@@ -491,6 +500,8 @@ class VaultView(QWidget):
 
         if not is_deleted:
             edit_button = QPushButton("Edit")
+            edit_button.setIcon(load_icon("edit.svg"))
+            edit_button.setIconSize(QSize(16, 16))
             edit_button.setToolTip("Edit credential")
             edit_button.clicked.connect(
                 lambda checked=False, cred_id=credential["id"]:
@@ -499,6 +510,8 @@ class VaultView(QWidget):
             actions.addWidget(edit_button)
 
         delete_button = QPushButton("Delete")
+        delete_button.setIcon(load_icon("delete.svg"))
+        delete_button.setIconSize(QSize(16, 16))
         delete_button.setToolTip(
             "Permanently delete credential" if is_deleted else "Move credential to Trash"
         )
@@ -528,6 +541,9 @@ class VaultView(QWidget):
     def _toggle_credential_view(self, enabled: bool):
         self.grid_view_enabled = enabled
         self.view_mode_btn.setText("List view" if enabled else "Grid view")
+        self.view_mode_btn.setIcon(
+            load_icon("rowview.svg" if enabled else "gridview.svg")
+        )
         if enabled:
             self.cred_list.setViewMode(QListView.ViewMode.IconMode)
             self.cred_list.setFlow(QListView.Flow.LeftToRight)
@@ -573,6 +589,7 @@ class VaultView(QWidget):
         self._pw_revealed = False
         self.detail_password.setText("••••••••••••••••")
         self.toggle_reveal_btn.setText("Reveal")
+        self.toggle_reveal_btn.setIcon(load_icon("reveal_on.svg"))
         self.copy_password_btn.setText("Copy")
 
         self.detail_url.setText(cred.get("url") or "None")
@@ -604,10 +621,12 @@ class VaultView(QWidget):
         if self._pw_revealed:
             self.detail_password.setText("••••••••••••••••")
             self.toggle_reveal_btn.setText("Reveal")
+            self.toggle_reveal_btn.setIcon(load_icon("reveal_on.svg"))
             self._pw_revealed = False
         else:
             self.detail_password.setText(self._raw_password)
             self.toggle_reveal_btn.setText("Hide")
+            self.toggle_reveal_btn.setIcon(load_icon("reveal_off.svg"))
             self._pw_revealed = True
 
     def _copy_password(self):
