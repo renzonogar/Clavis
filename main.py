@@ -26,7 +26,7 @@ def main():
         app = QApplication(sys.argv)
         app.setApplicationName("Clavis")
         app.setApplicationDisplayName("Clavis")
-        app_icon = QIcon(os.path.join(BASE_DIR, "assets", "ClavisLogoHQpng.png"))
+        app_icon = QIcon(os.path.join(BASE_DIR, "assets", "favicon.png"))
         if app_icon.isNull():
             raise RuntimeError("Unable to load the Clavis application icon.")
         app.setWindowIcon(app_icon)

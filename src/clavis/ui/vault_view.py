@@ -168,18 +168,19 @@ class VaultView(QWidget):
         header_row.addWidget(self.credentials_heading)
         header_row.addStretch()
 
-        self.add_btn = QPushButton("+ New")
+        self.add_btn = QPushButton("")
         self.add_btn.setStyleSheet(
             "background-color: #4f46e5; color: white; border: none; "
-            "border-radius: 6px; padding: 8px 12px; font-weight: 600;"
+            "border-radius: 6px; padding: 8px 8px; font-weight: 600;"
         )
         self.add_btn.clicked.connect(self._on_add_credential)
         header_row.addWidget(self.add_btn)
+        self.add_btn.setIcon(load_icon("add.svg"))
 
-        self.view_mode_btn = QPushButton("Grid view")
+        self.view_mode_btn = QPushButton("")
         self.view_mode_btn.setStyleSheet(
             "background-color: #262933; color: #e5e7eb; border: 1px solid "
-            "#374151; border-radius: 6px; padding: 8px 12px;"
+            "#374151; border-radius: 6px; padding: 8px 8px;"
         )
         self.view_mode_btn.setIcon(load_icon("gridview.svg"))
         self.view_mode_btn.setIconSize(QSize(18, 18))
@@ -274,7 +275,7 @@ class VaultView(QWidget):
         self.edit_btn.setStyleSheet("background-color: #262933; color: #e5e7eb; border: 1px solid #374151; padding: 6px 14px; border-radius: 6px;")
         self.edit_btn.clicked.connect(self._on_edit_credential)
 
-        self.delete_btn = QPushButton("Delete")
+        self.delete_btn = QPushButton("")
         self.delete_btn.setIcon(load_icon("delete.svg"))
         self.delete_btn.setIconSize(QSize(18, 18))
         self.delete_btn.setStyleSheet("background-color: #7f1d1d; color: #fca5a5; border: 1px solid #991b1b; padding: 6px 14px; border-radius: 6px;")
@@ -490,7 +491,8 @@ class VaultView(QWidget):
 
         actions = QHBoxLayout()
         actions.setSpacing(6)
-        view_button = QPushButton("View")
+        view_button = QPushButton("")
+        view_button.setIcon(load_icon("reveal_on.svg"))
         view_button.setToolTip("View credential details")
         view_button.clicked.connect(
             lambda checked=False, cred_id=credential["id"]:
@@ -499,7 +501,7 @@ class VaultView(QWidget):
         actions.addWidget(view_button)
 
         if not is_deleted:
-            edit_button = QPushButton("Edit")
+            edit_button = QPushButton("")
             edit_button.setIcon(load_icon("edit.svg"))
             edit_button.setIconSize(QSize(16, 16))
             edit_button.setToolTip("Edit credential")
@@ -509,7 +511,7 @@ class VaultView(QWidget):
             )
             actions.addWidget(edit_button)
 
-        delete_button = QPushButton("Delete")
+        delete_button = QPushButton("")
         delete_button.setIcon(load_icon("delete.svg"))
         delete_button.setIconSize(QSize(16, 16))
         delete_button.setToolTip(
@@ -540,7 +542,6 @@ class VaultView(QWidget):
 
     def _toggle_credential_view(self, enabled: bool):
         self.grid_view_enabled = enabled
-        self.view_mode_btn.setText("List view" if enabled else "Grid view")
         self.view_mode_btn.setIcon(
             load_icon("rowview.svg" if enabled else "gridview.svg")
         )
@@ -588,7 +589,6 @@ class VaultView(QWidget):
         self._raw_password = cred["password"]
         self._pw_revealed = False
         self.detail_password.setText("••••••••••••••••")
-        self.toggle_reveal_btn.setText("Reveal")
         self.toggle_reveal_btn.setIcon(load_icon("reveal_on.svg"))
         self.copy_password_btn.setText("Copy")
 
@@ -620,12 +620,10 @@ class VaultView(QWidget):
     def _toggle_password_reveal(self):
         if self._pw_revealed:
             self.detail_password.setText("••••••••••••••••")
-            self.toggle_reveal_btn.setText("Reveal")
             self.toggle_reveal_btn.setIcon(load_icon("reveal_on.svg"))
             self._pw_revealed = False
         else:
             self.detail_password.setText(self._raw_password)
-            self.toggle_reveal_btn.setText("Hide")
             self.toggle_reveal_btn.setIcon(load_icon("reveal_off.svg"))
             self._pw_revealed = True
 

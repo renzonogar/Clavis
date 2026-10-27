@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
     QScrollArea, QWidget, QGraphicsOpacityEffect
 )
 
+from clavis.ui.icons import load_icon
+
 from ..password_generator import PasswordGenerator, GeneratorOptions
 from .clipboard import ClipboardAutoClear
 
@@ -180,15 +182,17 @@ class CredentialDialog(QDialog):
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_input.textChanged.connect(self._on_password_changed)
 
-        self.toggle_pw_btn = QPushButton("Show")
+        self.toggle_pw_btn = QPushButton("")
         self.toggle_pw_btn.setFixedWidth(55)
         self.toggle_pw_btn.setProperty("class", "secondary")
         self.toggle_pw_btn.clicked.connect(self._toggle_pw_visibility)
+        self.toggle_pw_btn.setIcon(load_icon("reveal_on.svg"))
 
-        self.copy_pw_btn = QPushButton("Copy")
+        self.copy_pw_btn = QPushButton("")
         self.copy_pw_btn.setFixedWidth(55)
         self.copy_pw_btn.setProperty("class", "secondary")
         self.copy_pw_btn.clicked.connect(self._copy_password)
+        self.copy_pw_btn.setIcon(load_icon("copy.svg"))
 
         pw_row.addWidget(self.password_input, 1)
         pw_row.addWidget(self.toggle_pw_btn)
@@ -305,10 +309,10 @@ class CredentialDialog(QDialog):
     def _toggle_pw_visibility(self):
         if self.password_input.echoMode() == QLineEdit.EchoMode.Password:
             self.password_input.setEchoMode(QLineEdit.EchoMode.Normal)
-            self.toggle_pw_btn.setText("Hide")
+            self.toggle_pw_btn.setIcon(load_icon("reveal_off.svg"))
         else:
             self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-            self.toggle_pw_btn.setText("Show")
+            self.toggle_pw_btn.setIcon(load_icon("reveal_on.svg"))
 
     def _copy_password(self):
         self.clipboard_auto_clear.copy_password(self.password_input.text())

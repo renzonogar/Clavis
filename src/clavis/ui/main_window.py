@@ -23,7 +23,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Clavis — Offline-First Encrypted Vault")
+        self.setWindowTitle("Your vault. Your device. Your control.")
         self.resize(900, 600)
         self.setMinimumSize(800, 550)
 
