@@ -5,17 +5,25 @@ and Main Vault screens, session inactivity timer, and USB presence polling.
 """
 
 from typing import Optional
+from pathlib import Path
 
-from PySide6.QtCore import QEvent, QTimer
-from PySide6.QtGui import QCloseEvent, QCursor
-from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget, QMessageBox, QLabel, QWidget
+from PySide6.QtCore import QEvent, QTimer, QSettings
+from PySide6.QtGui import QCloseEvent, QCursor, QKeySequence, QShortcut, QIcon, QFont, QGuiApplication
+from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget, QMessageBox, QLabel, QWidget, QFileDialog
 
-from ..vault import ClavisVault, VaultAuthenticationError, MalformedVaultError
+from ..vault import ClavisVault, VaultAuthenticationError, MalformedVaultError, LegacyVaultFormatError
 from ..session import SessionManager
 from ..storage import StorageError, DriveDisconnectedError, InsufficientSpaceError
 from .welcome_view import WelcomeView
 from .unlock_view import UnlockView
 from .vault_view import VaultView
+from .i18n import (
+    set_language,
+    current_language,
+    tr,
+    apply_translations,
+    set_translated_text,
+)
 
 
 class MainWindow(QMainWindow):
@@ -23,14 +31,35 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Your vault. Your device. Your control.")
-        self.resize(900, 600)
-        self.setMinimumSize(800, 550)
+        self.setWindowTitle("Clavis — Cofre local de senhas")
+        screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            self.resize(1240, 780)
+        else:
+            available = screen.availableGeometry()
+            available_width = max(600, available.width() - 48)
+            available_height = max(400, available.height() - 48)
+            self.resize(
+                min(1240, available_width),
+                min(780, available_height),
+            )
+            self.setMinimumSize(
+                min(1000, available_width),
+                min(640, available_height),
+            )
+        if screen is None:
+            self.setMinimumSize(1000, 640)
+        self.ui_settings = QSettings("Clavis", "Clavis")
+        set_language(str(self.ui_settings.value("interface/language", "en")))
+        self.setWindowTitle(tr("Clavis — Cofre local de senhas"))
+        icon_path = Path(__file__).resolve().parents[3] / "assets" / "favicon.png"
+        if icon_path.is_file():
+            self.setWindowIcon(QIcon(str(icon_path)))
 
         # Global Dark Styling
         self.setStyleSheet("""
             QMainWindow {
-                background-color: #121316;
+                background-color: #08090a;
             }
             QStatusBar {
                 background-color: #0d0e11;
@@ -50,6 +79,7 @@ class MainWindow(QMainWindow):
         self._init_stack()
         self._init_status_bar()
         self._init_heartbeat_timer()
+        apply_translations(self, current_language())
 
     def _init_stack(self):
         self.stack = QStackedWidget()
@@ -73,13 +103,29 @@ class MainWindow(QMainWindow):
 
     def _init_status_bar(self):
         self.status_bar = self.statusBar()
-        self.status_offline = QLabel("● OFFLINE SYSTEM (No Network)")
-        self.status_offline.setStyleSheet("color: #34d399; font-weight: 600; padding: 2px 8px;")
-        self.status_bar.addPermanentWidget(self.status_offline)
+        self.status_vault = QLabel("LOCAL VAULT")
+        self.status_vault.setStyleSheet("color:#00e59b; font-family:Consolas,monospace; font-weight:700; padding:2px 8px;")
+        self.status_bar.addPermanentWidget(self.status_vault)
 
-        self.status_timer = QLabel("Auto-lock: 5m 00s")
-        self.status_timer.setStyleSheet("color: #9ca3af; padding: 2px 8px;")
+        self.status_timer = QLabel("Cofre bloqueado")
+        self.status_timer.setStyleSheet("color:#596875; font-family:Consolas,monospace; padding:2px 8px;")
         self.status_bar.addPermanentWidget(self.status_timer)
+        self.status_save = QLabel("Sem alterações")
+        self.status_save.setStyleSheet("color:#91a0ad; padding:2px 8px;")
+        self.status_bar.addPermanentWidget(self.status_save)
+        self._setup_shortcuts()
+
+    def _setup_shortcuts(self):
+        shortcuts = (
+            ("Ctrl+N", self._shortcut_new_credential),
+            ("Ctrl+F", self._shortcut_search),
+            ("Ctrl+L", self._lock_and_show_welcome),
+            ("Ctrl+E", self._request_safe_eject),
+            ("Alt+C", self._shortcut_copy_password),
+        )
+        for key, callback in shortcuts:
+            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.activated.connect(callback)
 
     def _init_heartbeat_timer(self):
         # 1-second timer for timeout counting and USB disconnect monitoring
@@ -105,7 +151,7 @@ class MainWindow(QMainWindow):
 
     def _on_heartbeat(self):
         if not self.vault.is_unlocked:
-            self.status_timer.setText("Vault Locked")
+            self.status_timer.setText(tr("Cofre bloqueado"))
             return
 
         mouse_position = QCursor.pos()
@@ -121,28 +167,39 @@ class MainWindow(QMainWindow):
         if not self.session.check_usb_presence():
             QMessageBox.critical(
                 self,
-                "USB Device Disconnected",
-                "The USB drive containing the active vault was disconnected or removed. "
-                "The vault has been locked immediately to protect sensitive credentials."
+                tr("Unidade desconectada"),
+                tr("A unidade do cofre foi removida ou ficou inacessível. A sessão foi bloqueada; alterações ainda não salvas podem ter sido perdidas.")
             )
-            self._lock_and_show_welcome()
             return
 
         # Check inactivity timeout
+        if self.session.get_remaining_seconds() == 0 and self.vault.has_unsaved_changes:
+            try:
+                self._save_current_vault()
+                if self.vault_view:
+                    self.vault_view.mark_saved()
+            except Exception as error:
+                self.session.record_activity()
+                QMessageBox.warning(
+                    self, tr("Falha ao salvar"),
+                    tr("O bloqueio automático foi adiado para evitar perder alterações: {error}", error=error),
+                )
+                return
+
         if self.session.check_inactivity():
             QMessageBox.information(
                 self,
-                "Session Timed Out",
-                "Your vault has been locked due to inactivity."
+                tr("Sessão encerrada"),
+                tr("O cofre foi bloqueado por inatividade.")
             )
             return
 
         rem = self.session.get_remaining_seconds()
         if rem is not None:
             mins, secs = divmod(rem, 60)
-            self.status_timer.setText(f"Auto-lock: {mins}m {secs:02d}s")
+            self.status_timer.setText(tr("Bloqueio em: {minutes}m {seconds:02d}s", minutes=mins, seconds=secs))
         else:
-            self.status_timer.setText("Auto-lock: Disabled")
+            self.status_timer.setText(tr("Bloqueio automático desativado"))
 
     def _on_prompt_create_vault(self, target_path: str):
         self.vault = ClavisVault(target_path)
@@ -162,13 +219,12 @@ class MainWindow(QMainWindow):
     def _on_create_submitted(self, master_pw: str, confirm_pw: str):
         try:
             self.vault = ClavisVault.create_new(
-                vault_path=self.unlock_view.target_vault_path,
-                master_password=master_pw
+                self.unlock_view.target_vault_path, master_pw
             )
             self._replace_session(self.vault)
             self._transition_to_vault()
         except Exception as e:
-            self.unlock_view.show_error(f"Failed to create encrypted vault: {e}")
+            self.unlock_view.show_error(tr("Falha ao criar o cofre KDBX: {error}", error=e))
 
     def _on_unlock_submitted(self, master_pw: str):
         try:
@@ -177,13 +233,46 @@ class MainWindow(QMainWindow):
             self._transition_to_vault()
         except VaultAuthenticationError:
             # Generic error to prevent leaking whether password, tag, or file caused it
-            self.unlock_view.show_error("Authentication failed or vault is corrupted.")
+            self.unlock_view.show_error(tr("Senha incorreta ou cofre inválido."))
         except MalformedVaultError as me:
-            self.unlock_view.show_error(f"Invalid vault format: {me}")
+            self.unlock_view.show_error(tr("Formato de cofre inválido: {error}", error=me))
+        except LegacyVaultFormatError:
+            self._offer_legacy_import(master_pw)
         except StorageError as se:
-            self.unlock_view.show_error(f"Storage error: {se}")
+            self.unlock_view.show_error(tr("Erro de armazenamento: {error}", error=se))
         except Exception:
-            self.unlock_view.show_error("Authentication failed or vault is corrupted.")
+            self.unlock_view.show_error(tr("Não foi possível abrir o cofre. Verifique a senha e o arquivo."))
+
+    def _offer_legacy_import(self, master_pw: str):
+        answer = QMessageBox.question(
+            self,
+            tr("Importar cofre antigo"),
+            tr("Este arquivo usa o formato antigo do Clavis. Deseja convertê-lo para "
+               "KDBX, mantendo o arquivo original intacto?"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            self.unlock_view.show_error(
+                tr("O cofre antigo precisa ser importado para KDBX.")
+            )
+            return
+        default_path = self.vault.path.rsplit(".", 1)[0] + "-importado.vault"
+        destination, _ = QFileDialog.getSaveFileName(
+            self, tr("Salvar novo cofre KDBX"), default_path,
+            tr("Clavis Vault (*.vault)")
+        )
+        if not destination:
+            return
+        try:
+            self.vault = ClavisVault.import_legacy(
+                self.vault.path, destination, master_pw
+            )
+            self._replace_session(self.vault)
+            self._transition_to_vault()
+        except Exception as error:
+            self.unlock_view.show_error(
+                tr("Falha ao importar o cofre: {error}", error=error)
+            )
 
     def _transition_to_vault(self):
         # Remove old vault view if any
@@ -194,43 +283,75 @@ class MainWindow(QMainWindow):
         self.vault_view = VaultView(self.vault)
         self.vault_view.lock_requested.connect(self._lock_and_show_welcome)
         self.vault_view.save_requested.connect(self._save_vault)
+        self.vault_view.eject_requested.connect(self._request_safe_eject)
         self.vault_view.settings_view.timeout_changed.connect(self.session.set_timeout)
-        self.vault_view.settings_view.master_password_change_requested.connect(self.vault.change_master_password)
+        self.vault_view.settings_view.clipboard_timeout_changed.connect(
+            self.vault_view.clipboard_auto_clear.set_timeout_seconds
+        )
+        self.vault_view.settings_view.font_size_changed.connect(self._apply_font_size)
+        self.vault_view.settings_view.master_password_change_requested.connect(
+            self._change_master_password
+        )
+        self.vault_view.settings_view.language_changed.connect(self._on_language_changed)
+        self.session.set_timeout(self.vault_view.settings_view.timeout_seconds)
+        self._apply_font_size(self.vault_view.settings_view.font_size)
+        self.vault_view.clipboard_auto_clear.set_timeout_seconds(
+            self.vault_view.settings_view.clipboard_timeout_seconds
+        )
 
         self.stack.addWidget(self.vault_view)
         self.stack.setCurrentWidget(self.vault_view)
         self.session.record_activity()
+        apply_translations(self, current_language())
 
     def _save_vault(self):
         try:
-            success, msg = self.vault.save(preserve_backup=True)
+            _, msg = self._save_current_vault()
             if self.vault_view:
                 self.vault_view.mark_saved()
-            QMessageBox.information(self, "Vault Saved", msg)
+            set_translated_text(self.status_save, "Cofre salvo")
+            QMessageBox.information(self, tr("Cofre salvo"), msg)
         except DriveDisconnectedError as de:
-            QMessageBox.critical(self, "USB Disconnected", str(de))
+            QMessageBox.critical(self, tr("Unidade desconectada"), str(de))
         except InsufficientSpaceError as ie:
-            QMessageBox.critical(self, "Insufficient Space", str(ie))
+            QMessageBox.critical(self, tr("Espaço insuficiente"), str(ie))
         except StorageError as se:
-            QMessageBox.critical(self, "Save Failed", str(se))
+            QMessageBox.critical(self, tr("Falha ao salvar"), str(se))
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save vault: {e}")
+            QMessageBox.critical(self, tr("Erro"), tr("Falha ao salvar o cofre: {error}", error=e))
+
+    def _change_master_password(self, password: str):
+        try:
+            self.vault.change_master_password(password)
+            if self.vault_view:
+                self.vault_view.mark_saved()
+            set_translated_text(
+                self.status_save, "Senha mestra alterada e cofre salvo"
+            )
+        except Exception as error:
+            QMessageBox.critical(
+                self, tr("Falha ao alterar senha mestra"),
+                tr("A senha mestra não pôde ser salva: {error}", error=error),
+            )
 
     def _lock_and_show_welcome(self):
         if self.vault.has_unsaved_changes:
             ans = QMessageBox.question(
                 self,
-                "Unsaved Changes",
-                "You have unsaved changes in your vault. Do you want to save them before locking?",
+                tr("Alterações não salvas"),
+                tr("Há alterações não salvas. Deseja salvar antes de bloquear o cofre?"),
                 QMessageBox.StandardButton.Save
                 | QMessageBox.StandardButton.Discard
                 | QMessageBox.StandardButton.Cancel
             )
             if ans == QMessageBox.StandardButton.Save:
                 try:
-                    self.vault.save(preserve_backup=True)
+                    self._save_current_vault()
                 except Exception as e:
-                    QMessageBox.warning(self, "Save Failed", f"Could not save changes: {e}")
+                    QMessageBox.warning(
+                        self, tr("Falha ao salvar"),
+                        tr("Não foi possível salvar as alterações: {error}", error=e),
+                    )
                     return
             elif ans == QMessageBox.StandardButton.Cancel:
                 return
@@ -251,17 +372,20 @@ class MainWindow(QMainWindow):
         if self.vault.is_unlocked and self.vault.has_unsaved_changes:
             ans = QMessageBox.question(
                 self,
-                "Unsaved Changes",
-                "You have unsaved changes in your vault. Save before quitting?",
+                tr("Alterações não salvas"),
+                tr("Há alterações não salvas. Deseja salvar antes de sair?"),
                 QMessageBox.StandardButton.Save
                 | QMessageBox.StandardButton.Discard
                 | QMessageBox.StandardButton.Cancel
             )
             if ans == QMessageBox.StandardButton.Save:
                 try:
-                    self.vault.save(preserve_backup=True)
+                    self._save_current_vault()
                 except Exception as e:
-                    QMessageBox.critical(self, "Save Failed", f"Save failed: {e}. Aborting quit.")
+                    QMessageBox.critical(
+                        self, tr("Falha ao salvar"),
+                        tr("Não foi possível salvar: {error}. O aplicativo continuará aberto.", error=e),
+                    )
                     event.ignore()
                     return
             elif ans == QMessageBox.StandardButton.Cancel:
@@ -272,3 +396,44 @@ class MainWindow(QMainWindow):
             self.vault_view.clear_sensitive_clipboard()
         self.vault.lock()
         event.accept()
+
+    def _shortcut_new_credential(self):
+        if self.vault_view and self.vault.is_unlocked:
+            self.vault_view._on_add_credential()
+
+    def _shortcut_search(self):
+        if self.vault_view and self.vault.is_unlocked:
+            self.vault_view.search_input.setFocus()
+
+    def _shortcut_copy_password(self):
+        if self.vault_view and self.vault.is_unlocked:
+            self.vault_view._copy_selected_password()
+
+    def _request_safe_eject(self):
+        QMessageBox.information(
+            self,
+            tr("Ejeção segura"),
+            tr("Este dispositivo não oferece uma operação de ejeção segura compatível. Salve e bloqueie o cofre antes de remover a unidade."),
+        )
+
+    def _on_language_changed(self, language: str):
+        set_language(language)
+        self.ui_settings.setValue("interface/language", language)
+        apply_translations(self, language)
+        self.setWindowTitle(tr("Clavis — Cofre local de senhas"))
+
+    def _save_current_vault(self):
+        preserve_backup = (
+            self.vault_view.settings_view.backup_enabled
+            if self.vault_view is not None
+            else True
+        )
+        return self.vault.save(preserve_backup=preserve_backup)
+
+    @staticmethod
+    def _apply_font_size(size: int):
+        application = QApplication.instance()
+        if application is not None:
+            font = QFont(application.font())
+            font.setPointSize(size)
+            application.setFont(font)

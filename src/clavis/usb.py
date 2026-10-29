@@ -12,8 +12,8 @@ be treated as a second-factor authentication mechanism.
 from dataclasses import dataclass
 import os
 import platform
+import shutil
 import subprocess
-import sys
 from typing import List, Optional
 
 
@@ -139,13 +139,13 @@ class UsbManager:
                     drive_letter = f"{chr(65 + letter_idx)}:\\"
                     # DRIVE_REMOVABLE = 2
                     drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive_letter)
-                    if drive_type == 2 or drive_letter.upper() not in ("C:\\", "D:\\"):
+                    if drive_type == 2:
                         total, free = cls._get_disk_usage(drive_letter)
                         drives.append(UsbDevice(
                             device_id=drive_letter,
                             mount_point=drive_letter,
-                            label=f"Removable Drive ({drive_letter[:2]})",
-                            filesystem="FAT32/NTFS",
+                            label=f"Unidade removível ({drive_letter[:2]})",
+                            filesystem="desconhecido",
                             total_bytes=total,
                             free_bytes=free,
                             is_removable=(drive_type == 2),

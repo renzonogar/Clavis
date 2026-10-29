@@ -1,178 +1,173 @@
-"""
-Tests for Clavis Vault Operations:
-- In-memory SQLite lifecycle
-- Vault creation and reopening round trips
-- Credential CRUD operations
-- Password history logging on credential edit
-- Soft delete, trash listing, restore, permanent deletion, empty trash
-- Search querying
-- Vault lock wipes in-memory references
-"""
+"""Vault lifecycle, KeePass interoperability, and legacy conversion tests."""
 
 import os
 import sys
-import tempfile
+from io import BytesIO
+
 import pytest
+from pykeepass import PyKeePass
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
-from clavis.vault import ClavisVault, VaultAuthenticationError, VaultStateError
-from clavis.kdf import Argon2idParams
-
-FAST_PARAMS = Argon2idParams(
-    time_cost=1,
-    memory_cost=4096,
-    parallelism=1,
-    salt_length=16,
-    key_length=32
+from clavis.crypto import Argon2idParams, MAGIC_BYTES, encrypt_vault_payload
+from clavis.database import VaultDatabase
+from clavis.vault import (
+    ClavisVault,
+    LegacyVaultFormatError,
+    VaultAuthenticationError,
+    VaultStateError,
+    MalformedVaultError,
 )
 
 
-def test_vault_create_and_reopen(tmp_path):
-    vault_file = str(tmp_path / "test_usb_drive" / "passwords.vault")
-    os.makedirs(os.path.dirname(vault_file), exist_ok=True)
-    master_pw = "StrongVaultMasterKey#987"
+PASSWORD = "StrongVaultMasterKey#987"
 
-    # 1. Create Vault
-    vault = ClavisVault.create_new(
-        vault_path=vault_file,
-        master_password=master_pw,
-        kdf_params=FAST_PARAMS,
-        auxiliary_usb_uuid="USB-TEST-UUID-1234"
+
+def test_vault_create_reopen_and_open_in_keepass(tmp_path):
+    vault_path = str(tmp_path / "passwords.vault")
+    vault = ClavisVault.create_new(vault_path, PASSWORD)
+    first = vault.db.add_credential(
+        "ProtonMail", "alice@proton.me", "Mail-secret-92",
+        url="https://proton.me", notes="Primary email",
     )
-    assert vault.is_unlocked is True
-    assert vault.db is not None
-    assert os.path.exists(vault_file)
-
-    # 2. Add Credentials
-    cred1_id = vault.db.add_credential(
-        title="ProtonMail",
-        username="alice@proton.me",
-        password="PassWord#123",
-        url="https://proton.me",
-        notes="Primary email"
+    second = vault.db.add_credential(
+        "GitHub", "alice_dev", "Git-secret-58", url="https://github.com"
     )
-    assert cred1_id is not None
-
-    cred2_id = vault.db.add_credential(
-        title="GitHub",
-        username="alice_dev",
-        password="GitHubSecret#456",
-        url="https://github.com"
-    )
-    assert cred2_id is not None
-
-    # 3. Save to disk/USB
     vault.save()
-
-    # 4. Lock vault
     vault.lock()
-    assert vault.is_unlocked is False
-    assert vault.db is None
 
-    # Operations should fail when locked
+    raw = open(vault_path, "rb").read()
+    assert not raw.startswith(MAGIC_BYTES)
+    keepass = PyKeePass(BytesIO(raw), password=PASSWORD)
+    assert {entry.title for entry in keepass.entries} >= {"ProtonMail", "GitHub"}
+
+    reopened = ClavisVault(vault_path)
+    reopened.open_existing(PASSWORD)
+    credentials = reopened.db.list_credentials()
+    assert {credential["id"] for credential in credentials} == {first, second}
+    assert {credential["title"] for credential in credentials} == {"ProtonMail", "GitHub"}
+
+    with pytest.raises(VaultAuthenticationError):
+        ClavisVault(vault_path).open_existing("WrongPassword123!")
+
+
+def test_locked_vault_cannot_be_saved(tmp_path):
+    vault = ClavisVault.create_new(str(tmp_path / "locked.vault"), PASSWORD)
+    vault.lock()
     with pytest.raises(VaultStateError):
         vault.save()
 
-    # 5. Reopen with correct password
-    reopened = ClavisVault(vault_file)
-    reopened.open_existing(master_pw)
-    assert reopened.is_unlocked is True
-    assert reopened.db is not None
 
-    creds = reopened.db.list_credentials()
-    assert len(creds) == 2
-    titles = [c["title"] for c in creds]
-    assert "ProtonMail" in titles
-    assert "GitHub" in titles
-
-    # 6. Reopen with wrong password must fail
-    fail_vault = ClavisVault(vault_file)
+def test_master_password_change_reencrypts_kdbx(tmp_path):
+    path = str(tmp_path / "password-change.vault")
+    vault = ClavisVault.create_new(path, PASSWORD)
+    vault.db.add_credential("Example", "user", "Example-secret-83")
+    vault.change_master_password("Another-Strong-Master-Password-7!")
     with pytest.raises(VaultAuthenticationError):
-        fail_vault.open_existing("WrongPassword123!")
+        ClavisVault(path).open_existing(PASSWORD)
+    reopened = ClavisVault(path)
+    reopened.open_existing("Another-Strong-Master-Password-7!")
+    assert len(reopened.db.list_credentials()) == 1
 
 
-def test_credential_history_and_updates(tmp_path):
-    vault_file = str(tmp_path / "hist.vault")
-    vault = ClavisVault.create_new(vault_file, "MasterKey123456!", kdf_params=FAST_PARAMS)
-
-    cred_id = vault.db.add_credential("Bank", "user", "OldPassword1")
-    hist = vault.db.get_password_history(cred_id)
-    assert len(hist) == 0
-
-    # Update title and username only - password unchanged
-    vault.db.update_credential(cred_id, "Bank Corporate", "user2", "OldPassword1")
-    assert len(vault.db.get_password_history(cred_id)) == 0
-
-    # Update password - old password should be stored in history
-    vault.db.update_credential(cred_id, "Bank Corporate", "user2", "NewPassword2")
-    hist = vault.db.get_password_history(cred_id)
-    assert len(hist) == 1
-    assert hist[0]["old_password"] == "OldPassword1"
-
-    # Update password again
-    vault.db.update_credential(cred_id, "Bank Corporate", "user2", "NewPassword3")
-    hist = vault.db.get_password_history(cred_id)
-    assert len(hist) == 2
-    assert hist[0]["old_password"] == "NewPassword2"
-    assert hist[1]["old_password"] == "OldPassword1"
+def test_open_rejects_malformed_kdbx(tmp_path):
+    path = tmp_path / "invalid.vault"
+    path.write_bytes(b"not a KDBX database")
+    with pytest.raises(MalformedVaultError):
+        ClavisVault(str(path)).open_existing(PASSWORD)
 
 
-def test_soft_delete_and_trash_workflow(tmp_path):
-    vault_file = str(tmp_path / "trash.vault")
-    vault = ClavisVault.create_new(vault_file, "MasterKey123456!", kdf_params=FAST_PARAMS)
-
-    id1 = vault.db.add_credential("Item 1", "u1", "p1")
-    id2 = vault.db.add_credential("Item 2", "u2", "p2")
-    id3 = vault.db.add_credential("Item 3", "u3", "p3")
-
-    assert len(vault.db.list_credentials(include_deleted=False)) == 3
-    assert len(vault.db.list_credentials(include_deleted=True)) == 0
-
-    # Soft delete item 1
-    vault.db.soft_delete_credential(id1)
-    active = vault.db.list_credentials(include_deleted=False)
-    trash = vault.db.list_credentials(include_deleted=True)
-
-    assert len(active) == 2
-    assert len(trash) == 1
-    assert trash[0]["id"] == id1
-
-    # Restore item 1
-    vault.db.restore_credential(id1)
-    assert len(vault.db.list_credentials(include_deleted=False)) == 3
-    assert len(vault.db.list_credentials(include_deleted=True)) == 0
-
-    # Soft delete item 2 and permanently delete it
-    vault.db.soft_delete_credential(id2)
-    vault.db.permanently_delete_credential(id2)
-    assert len(vault.db.list_credentials(include_deleted=False)) == 2
-    assert len(vault.db.list_credentials(include_deleted=True)) == 0
-    assert vault.db.get_credential(id2) is None
-
-    # Empty trash
-    vault.db.soft_delete_credential(id3)
-    assert len(vault.db.list_credentials(include_deleted=True)) == 1
-    purged = vault.db.empty_trash()
-    assert purged == 1
-    assert len(vault.db.list_credentials(include_deleted=True)) == 0
+def test_password_history_is_preserved_in_order(tmp_path):
+    vault = ClavisVault.create_new(str(tmp_path / "history.vault"), PASSWORD)
+    credential_id = vault.db.add_credential("Bank", "user", "OldPassword1")
+    vault.db.update_credential(credential_id, "Bank", "user", "NewPassword2")
+    vault.db.update_credential(credential_id, "Bank", "user", "NewPassword3")
+    history = vault.db.get_password_history(credential_id)
+    assert [item["old_password"] for item in history] == [
+        "NewPassword2", "OldPassword1",
+    ]
 
 
-def test_credential_search(tmp_path):
-    vault_file = str(tmp_path / "search.vault")
-    vault = ClavisVault.create_new(vault_file, "MasterKey123456!", kdf_params=FAST_PARAMS)
+def test_trash_restore_delete_and_empty(tmp_path):
+    vault = ClavisVault.create_new(str(tmp_path / "trash.vault"), PASSWORD)
+    first = vault.db.add_credential("Item 1", "u1", "p1")
+    second = vault.db.add_credential("Item 2", "u2", "p2")
+    third = vault.db.add_credential("Item 3", "u3", "p3")
 
+    assert len(vault.db.list_credentials()) == 3
+    assert vault.db.soft_delete_credential(first)
+    assert [item["id"] for item in vault.db.list_credentials(include_deleted=True)] == [first]
+    assert vault.db.restore_credential(first)
+    assert len(vault.db.list_credentials()) == 3
+    assert vault.db.soft_delete_credential(second)
+    assert vault.db.permanently_delete_credential(second)
+    assert vault.db.get_credential(second) is None
+    assert vault.db.soft_delete_credential(third)
+    assert vault.db.empty_trash() == 1
+    assert vault.db.list_credentials(include_deleted=True) == []
+
+
+def test_search_covers_title_username_url_and_notes(tmp_path):
+    vault = ClavisVault.create_new(str(tmp_path / "search.vault"), PASSWORD)
     vault.db.add_credential("GitLab", "john_gitlab", "pw1", url="https://gitlab.com")
-    vault.db.add_credential("DigitalOcean", "john_do", "pw2", notes="API access token inside")
+    vault.db.add_credential("DigitalOcean", "john_do", "pw2", notes="API access token")
     vault.db.add_credential("Twitter", "john_tweet", "pw3")
+    for query in ("gitlab", "john_do", "token", "gitlab.com"):
+        assert len(vault.db.list_credentials(search_query=query)) == 1
+    assert vault.db.list_credentials(search_query="not-found") == []
 
-    # Search title
-    assert len(vault.db.list_credentials(search_query="gitlab")) == 1
-    # Search username
-    assert len(vault.db.list_credentials(search_query="john_do")) == 1
-    # Search notes
-    assert len(vault.db.list_credentials(search_query="token")) == 1
-    # Search url
-    assert len(vault.db.list_credentials(search_query="gitlab.com")) == 1
-    # No match
-    assert len(vault.db.list_credentials(search_query="nonexistent")) == 0
+
+def test_legacy_import_preserves_original_and_converts_entries(tmp_path):
+    legacy_path = str(tmp_path / "old.vault")
+    converted_path = str(tmp_path / "converted.vault")
+    legacy_db = VaultDatabase()
+    credential_id = legacy_db.add_credential(
+        "Old service", "legacy-user", "Old-secret-64",
+        url="https://example.test", notes="retained",
+    )
+    legacy_db.update_credential(
+        credential_id, "Old service", "legacy-user", "Current-secret-72",
+        url="https://example.test", notes="retained",
+    )
+    deleted_id = legacy_db.add_credential("Deleted", "old-user", "trash-secret-73")
+    legacy_db.soft_delete_credential(deleted_id)
+    legacy_bytes = encrypt_vault_payload(
+        legacy_db.serialize(),
+        PASSWORD,
+        Argon2idParams(time_cost=1, memory_cost=4096, parallelism=1),
+    )
+    with open(legacy_path, "wb") as file:
+        file.write(legacy_bytes)
+    original = open(legacy_path, "rb").read()
+
+    with pytest.raises(LegacyVaultFormatError):
+        ClavisVault(legacy_path).open_existing(PASSWORD)
+
+    converted = ClavisVault.import_legacy(legacy_path, converted_path, PASSWORD)
+    assert open(legacy_path, "rb").read() == original
+    imported = converted.db.get_credential(
+        converted.db.list_credentials()[0]["id"]
+    )
+    assert imported["title"] == "Old service"
+    assert imported["username"] == "legacy-user"
+    assert imported["url"] == "https://example.test"
+    assert imported["notes"] == "retained"
+    assert imported["password"] == "Current-secret-72"
+    history = converted.db.get_password_history(imported["id"])
+    assert [item["old_password"] for item in history] == ["Old-secret-64"]
+    assert len(converted.db.list_credentials(include_deleted=True)) == 1
+    converted.lock()
+
+    reopened = ClavisVault(converted_path)
+    reopened.open_existing(PASSWORD)
+    assert reopened.db.get_credential(credential_id) is None
+    assert len(reopened.db.list_credentials()) == 1
+    assert len(reopened.db.list_credentials(include_deleted=True)) == 1
+
+
+def test_create_does_not_overwrite_existing_file(tmp_path):
+    path = tmp_path / "existing.vault"
+    path.write_bytes(b"keep this file")
+    with pytest.raises(FileExistsError):
+        ClavisVault.create_new(str(path), PASSWORD)
+    assert path.read_bytes() == b"keep this file"

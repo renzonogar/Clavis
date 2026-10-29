@@ -1,0 +1,115 @@
+1. Objetivo e tecnologias
+
+Crie o Clavis, um gerenciador de senhas local que utiliza um banco .vault armazenado em uma unidade USB ou em um local escolhido pelo usuário.
+
+Utilize:
+
+    Python 3.12+ e PySide6.
+    Qt Widgets com QSS para reproduzir o visual.
+    pykeepass para manipular bancos .vault, sem implementar criptografia própria.
+    Dependências e instruções de instalação reproduzíveis.
+
+Priorize Windows, mas isole as integrações específicas do sistema operacional.
+2. Fidelidade visual
+
+Use as telas do Figma como fonte principal de referência. Não transforme a interface em um dashboard genérico.
+
+Preserve:
+
+    Tema escuro, com fundos próximos de #08090a, #0e1113 e #13171a.
+    Azul principal #284cff.
+    Textos claros, textos secundários cinza, bordas discretas e aparência técnica e compacta.
+    Verde para sucesso, amarelo para atenção e vermelho para perigo.
+    Barra lateral com logo, nome Clavis, versão e navegação.
+    Área principal com busca, conteúdo e barra de status inferior.
+    Hierarquia tipográfica, espaçamento, alinhamentos e estados visuais do design.
+
+Use o favicon.png fornecido como logo, preservando transparência e proporção. Não o substitua por um ícone genérico.
+
+Adapte os layouts ao redimensionamento da janela usando layouts do Qt, sem depender de coordenadas absolutas.
+3. Telas e funcionalidades
+
+Senhas Salvas
+
+    Listagem com serviço, URL, usuário, senha mascarada, força e ações.
+    Busca por título, URL e usuário.
+    Criar, editar e excluir credenciais com confirmação.
+    Copiar usuário e senha, revelar senha temporariamente e abrir URLs válidas.
+    Estados de cofre bloqueado, vazio, carregando e erro.
+
+Gerar Senha
+
+    Gerador usando o módulo secrets, nunca random.
+    Comprimento configurável.
+    Opções de maiúsculas, minúsculas, números, símbolos e exclusão de caracteres ambíguos.
+    Garantir as categorias selecionadas e validar combinações impossíveis.
+    Copiar resultado e salvar como credencial.
+    Histórico recente somente em memória, descartado ao bloquear ou encerrar.
+
+Cofre USB
+
+    Selecionar, criar, abrir e bloquear um banco .vault.
+    Mostrar caminho, tamanho, última modificação e informações reais do dispositivo quando disponíveis.
+    Exibir algoritmo e versão do banco somente quando puderem ser identificados.
+    Backup e importação/exportação em formato criptografado.
+    Registro de eventos sem senhas, chaves ou dados sensíveis.
+    Detectar indisponibilidade da unidade e bloquear a sessão com segurança.
+
+Configurações
+
+    Tempo de bloqueio automático por inatividade.
+    Prazo de limpeza da área de transferência.
+    Alteração da senha mestra com confirmação.
+    Preferências de interface, tamanho da fonte e backup automático.
+    Persistir apenas configurações não sensíveis.
+
+Sobre
+
+    Marca Clavis, versão, descrição, tecnologias e atalhos.
+    Não inventar autoria, licença, repositório ou links públicos. Deixar esses dados configuráveis.
+    Não apresentar autenticação em duas etapas como funcional sem uma implementação real e compatível com o formato do cofre.
+
+Crie também os diálogos necessários para abertura/criação do cofre e gerenciamento de credenciais, seguindo a mesma linguagem visual.
+4. Segurança e integridade
+
+    Nunca armazenar senha mestra ou credenciais em configurações, logs, telemetria ou arquivos temporários.
+    Manter senhas mascaradas por padrão.
+    Limpar a área de transferência após o prazo definido somente se ela ainda contiver o valor copiado pelo Clavis.
+    Implementar bloqueio automático e descartar referências aos dados sensíveis ao bloquear.
+    Explicar que Python não garante apagamento seguro da memória e que o sistema pode usar swap ou gerar dumps. Não prometer “nenhum rastro” ou proteção absoluta por operar em RAM.
+    Preservar a integridade do .vault durante gravações, com estratégia segura de substituição e recuperação.
+    Tratar senha incorreta, banco corrompido, falta de permissões, remoção do USB e falhas de gravação sem sobrescrever silenciosamente dados.
+    Não executar comandos de ejeção indiscriminadamente: oferecer ejeção segura apenas quando suportada e após salvar e fechar o cofre.
+    Não adicionar sincronização em nuvem ou chamadas de rede desnecessárias.
+
+5. Arquitetura e experiência
+
+Separe interface, serviços de cofre, geração de senhas, configurações e integrações do sistema.
+
+Use signals/slots e tarefas em segundo plano para operações demoradas, sem bloquear a interface. Não atualize widgets diretamente de threads de trabalho.
+
+Implemente os atalhos:
+
+    Ctrl+N: nova credencial.
+    Ctrl+F: buscar.
+    Ctrl+L: bloquear cofre.
+    Ctrl+E: solicitar ejeção segura.
+    Alt+C: copiar a senha selecionada.
+
+A barra de status deve mostrar informações reais, como estado do cofre, tempo restante para bloqueio e resultado da última gravação. Não simule sincronização ou consumo de RAM.
+6. Entrega
+
+Entregue uma aplicação executável, não apenas um esqueleto ou uma interface com botões sem ação.
+
+Inclua:
+
+    Estrutura organizada e implementação completa.
+    Dependências com versões compatíveis.
+    Instruções para instalação, execução e empacotamento com PyInstaller.
+    Testes para geração de senhas, operações .vault, configurações e bloqueio.
+    Um roteiro de teste manual das principais jornadas e falhas.
+    Limitações conhecidas e decisões de segurança.
+
+Use português do Brasil na interface. Dados de demonstração devem ficar restritos a um modo explicitamente identificado e nunca ser confundidos com um cofre real.
+
+Primeiro apresente brevemente a arquitetura e o plano de implementação; depois implemente em etapas executáveis, mantendo a fidelidade ao design e sem declarar funcionalidades incompletas como prontas.

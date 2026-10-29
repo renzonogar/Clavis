@@ -15,14 +15,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../s
 
 from clavis.vault import ClavisVault
 from clavis.session import SessionManager
-from clavis.kdf import Argon2idParams
-
-FAST_PARAMS = Argon2idParams(time_cost=1, memory_cost=4096, parallelism=1)
-
-
 def test_session_inactivity_timeout(tmp_path):
     vault_file = str(tmp_path / "session_test.vault")
-    vault = ClavisVault.create_new(vault_file, "SessionMasterKey#123", kdf_params=FAST_PARAMS)
+    vault = ClavisVault.create_new(vault_file, "SessionMasterKey#123")
     assert vault.is_unlocked is True
 
     # Set 2-second timeout
@@ -53,7 +48,7 @@ def test_session_usb_disconnection(tmp_path):
     os.makedirs(temp_dir)
     vault_file = str(temp_dir / "usb.vault")
 
-    vault = ClavisVault.create_new(vault_file, "UsbMasterKey#123", kdf_params=FAST_PARAMS)
+    vault = ClavisVault.create_new(vault_file, "UsbMasterKey#123")
     session = SessionManager(vault)
 
     disconnect_events = []

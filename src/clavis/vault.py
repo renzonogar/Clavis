@@ -1,180 +1,161 @@
-"""
-Clavis Vault Controller
-Orchestrates vault lifecycle: creation, opening, authentication, in-memory SQLite,
-safe persistence, atomic backup, and secure teardown.
-"""
+"""KDBX vault lifecycle and explicit legacy-vault conversion."""
 
-from dataclasses import dataclass
 import os
-import secrets
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional
 
-from .kdf import Argon2idParams
-from .crypto import (
-    encrypt_vault_payload,
-    decrypt_vault_payload,
-    VaultHeader,
-    VaultAuthenticationError,
-    MalformedVaultError,
-    CURRENT_VERSION
-)
-from .database import VaultDatabase
-from .storage import SafeVaultStorage, StorageError, InsufficientSpaceError, DriveDisconnectedError
-from .usb import UsbManager
+from pykeepass.exceptions import CredentialsError
+
+from clavis.crypto import MAGIC_BYTES, VaultAuthenticationError, MalformedVaultError
+from clavis.database import VaultDatabase as LegacyVaultDatabase
+from clavis.keepass_database import KeePassAuthenticationError, KeePassVaultDatabase
+from clavis.storage import SafeVaultStorage, StorageError
 
 
-class VaultStateError(Exception):
-    """Raised when an operation is performed in an invalid vault state."""
-    pass
+class LegacyVaultFormatError(ValueError):
+    """Raised when an older proprietary Clavis vault needs explicit conversion."""
+
+
+class VaultStateError(RuntimeError):
+    """Raised when an operation requires an unlocked vault."""
 
 
 class ClavisVault:
-    """
-    Primary Clavis Vault Controller instance.
-    Controls the lifecycle of a single encrypted vault.
-    """
-    def __init__(self, vault_path: Optional[str] = None):
-        self.vault_path: Optional[str] = os.path.abspath(vault_path) if vault_path else None
-        self.db: Optional[VaultDatabase] = None
-        self.header: Optional[VaultHeader] = None
-        self._master_password: Optional[str] = None
-        self.is_unlocked: bool = False
-        self.has_unsaved_changes: bool = False
-        self.auxiliary_usb_uuid: Optional[str] = None
+    """Manage a KeePass-compatible KDBX vault stored with a .vault extension."""
+
+    def __init__(self, path: str = ""):
+        self.path = path
+        self.db: Optional[KeePassVaultDatabase] = None
+        self.is_unlocked = False
+        self._has_unsaved_changes = False
+
+    @property
+    def vault_path(self) -> str:
+        return self.path
+
+    @property
+    def has_unsaved_changes(self) -> bool:
+        return self._has_unsaved_changes
+
+    @has_unsaved_changes.setter
+    def has_unsaved_changes(self, value: bool) -> None:
+        self._has_unsaved_changes = bool(value)
 
     @classmethod
-    def create_new(
-        cls,
-        vault_path: str,
-        master_password: str,
-        kdf_params: Optional[Argon2idParams] = None,
-        auxiliary_usb_uuid: Optional[str] = None
-    ) -> "ClavisVault":
-        """
-        Creates a new encrypted vault at vault_path.
-        Initializes an in-memory SQLite database, encrypts it, and writes to media.
-        """
-        if not master_password or len(master_password) < 8:
-            raise ValueError("Master password must be at least 8 characters long.")
-
-        vault = cls(vault_path=vault_path)
-        vault.db = VaultDatabase()
-        vault._master_password = master_password
-        vault.auxiliary_usb_uuid = auxiliary_usb_uuid
-
-        # Store vault metadata
-        vault.db.set_setting("created_at_version", str(CURRENT_VERSION))
-        if auxiliary_usb_uuid:
-            vault.db.set_setting("auxiliary_usb_uuid", auxiliary_usb_uuid)
-
-        # Serialize in-memory DB and encrypt
-        db_bytes = vault.db.serialize()
-        meta = {"aux_device_uuid": auxiliary_usb_uuid} if auxiliary_usb_uuid else {}
-        encrypted_bytes = encrypt_vault_payload(
-            plaintext_data=db_bytes,
-            master_password=master_password,
-            params=kdf_params,
-            metadata=meta
-        )
-
-        # Write to USB/disk atomically
-        SafeVaultStorage.atomic_write_vault(vault_path, encrypted_bytes, preserve_backup=False)
-
+    def create_new(cls, path: str, master_password: str) -> "ClavisVault":
+        if os.path.exists(path):
+            raise FileExistsError(f"A file already exists at {path}.")
+        vault = cls(path)
+        vault.db = KeePassVaultDatabase.create(master_password)
         vault.is_unlocked = True
-        vault.has_unsaved_changes = False
+        try:
+            vault.save()
+        except Exception:
+            vault.lock()
+            raise
         return vault
 
     def open_existing(self, master_password: str) -> None:
-        """
-        Reads encrypted vault from media, verifies authentication tag,
-        and reconstructs the in-memory SQLite database.
-        """
-        if not self.vault_path:
-            raise VaultStateError("No vault path specified.")
+        try:
+            data = SafeVaultStorage.read_vault_bytes(self.path)
+        except StorageError:
+            raise
 
-        raw_bytes = SafeVaultStorage.read_vault_bytes(self.vault_path)
-        plaintext_db_bytes, header = decrypt_vault_payload(raw_bytes, master_password)
+        if data.startswith(MAGIC_BYTES):
+            raise LegacyVaultFormatError(
+                "This is a legacy Clavis vault. Import it to a new KDBX vault first."
+            )
+        if len(data) < 12:
+            raise MalformedVaultError("Vault file is truncated or invalid.")
 
-        # Initialize in-memory database
-        self.db = VaultDatabase()
-        self.db.deserialize(plaintext_db_bytes)
-
-        self.header = header
-        self._master_password = master_password
+        try:
+            self.db = KeePassVaultDatabase.from_bytes(data, master_password)
+        except KeePassAuthenticationError as error:
+            raise VaultAuthenticationError(
+                "Incorrect master password or invalid KDBX vault."
+            ) from error
+        except CredentialsError as error:
+            raise VaultAuthenticationError(
+                "Incorrect master password or invalid KDBX vault."
+            ) from error
+        except Exception as error:
+            raise MalformedVaultError("Vault file is invalid or corrupted.") from error
         self.is_unlocked = True
-        self.has_unsaved_changes = False
-        self.auxiliary_usb_uuid = header.custom_metadata.get("aux_device_uuid")
 
-    def save(self, preserve_backup: bool = True) -> Tuple[bool, str]:
-        """
-        Encrypts current in-memory database and commits to physical storage safely.
-        """
-        if not self.is_unlocked or not self.db or not self._master_password:
-            raise VaultStateError("Vault is locked or not initialized.")
+    @classmethod
+    def import_legacy(
+        cls, source_path: str, destination_path: str, master_password: str
+    ) -> "ClavisVault":
+        """Convert a proprietary Clavis vault to KDBX without altering its source."""
+        if os.path.abspath(source_path) == os.path.abspath(destination_path):
+            raise ValueError("Choose a different destination to preserve the original.")
+        if os.path.exists(destination_path):
+            raise FileExistsError(f"A file already exists at {destination_path}.")
 
-        if not self.vault_path:
-            raise VaultStateError("Vault path is unset.")
+        legacy_bytes = SafeVaultStorage.read_vault_bytes(source_path)
+        if not legacy_bytes.startswith(MAGIC_BYTES):
+            raise ValueError("The selected file is not a legacy Clavis vault.")
+        payload, _header = cls._decrypt_legacy(legacy_bytes, master_password)
 
-        # Verify USB/path is still connected before attempting save
-        target_dir = os.path.dirname(self.vault_path)
-        if not SafeVaultStorage.check_drive_accessible(self.vault_path):
-            raise DriveDisconnectedError(
-                f"Storage media at '{target_dir}' is inaccessible. Did you disconnect the USB drive? "
-                "Write aborted to prevent unauthorized redirect to host disk."
-            )
+        legacy_db = LegacyVaultDatabase()
+        vault = cls(destination_path)
+        try:
+            legacy_db.deserialize(payload)
+            vault.db = KeePassVaultDatabase.create(master_password)
+            vault.is_unlocked = True
+            for include_deleted in (False, True):
+                credentials = legacy_db.list_credentials(
+                    include_deleted=include_deleted
+                )
+                for credential in credentials:
+                    new_id = vault.db.add_credential(
+                        title=credential["title"],
+                        username=credential["username"],
+                        password=credential["password"],
+                        url=credential.get("url", ""),
+                        notes=credential.get("notes", ""),
+                        is_deleted=include_deleted,
+                    )
+                    history = legacy_db.get_password_history(credential["id"])
+                    if history:
+                        vault.db.import_history(
+                            new_id,
+                            [item["old_password"] for item in history],
+                        )
+            vault.save()
+        except Exception:
+            vault.lock()
+            raise
+        finally:
+            legacy_db.close()
+            del payload
+            del _header
+        return vault
 
-        db_bytes = self.db.serialize()
-        meta = {"aux_device_uuid": self.auxiliary_usb_uuid} if self.auxiliary_usb_uuid else {}
+    @staticmethod
+    def _decrypt_legacy(data: bytes, master_password: str):
+        from clavis.crypto import decrypt_vault_payload
 
-        # Use same KDF params as original or defaults
-        params = None
-        if self.header:
-            params = Argon2idParams(
-                time_cost=self.header.time_cost,
-                memory_cost=self.header.memory_cost,
-                parallelism=self.header.parallelism,
-                salt_length=len(self.header.salt)
-            )
+        return decrypt_vault_payload(data, master_password)
 
-        # Fresh nonce and salt generated internally on every encrypt call
-        encrypted_bytes = encrypt_vault_payload(
-            plaintext_data=db_bytes,
-            master_password=self._master_password,
-            params=params,
-            metadata=meta
+    def save(self, preserve_backup: bool = True):
+        if not self.is_unlocked or self.db is None:
+            raise VaultStateError("Cannot save a locked vault.")
+        result = SafeVaultStorage.atomic_write_vault(
+            self.path, self.db.serialize(), preserve_backup=preserve_backup
         )
-
-        success, msg = SafeVaultStorage.atomic_write_vault(
-            self.vault_path,
-            encrypted_bytes,
-            preserve_backup=preserve_backup
-        )
-        self.has_unsaved_changes = False
-        return success, msg
+        self._has_unsaved_changes = False
+        return result
 
     def lock(self) -> None:
-        """
-        Locks the vault: closes the in-memory database, nullifies password references,
-        and releases transient memory.
-        """
-        if self.db:
+        if self.db is not None:
             self.db.close()
-            self.db = None
-
-        self._master_password = None
+        self.db = None
         self.is_unlocked = False
-        self.has_unsaved_changes = False
-        self.header = None
+        self._has_unsaved_changes = False
 
     def change_master_password(self, new_password: str) -> None:
-        """
-        Updates the master password for the active session.
-        Will re-encrypt on next save.
-        """
-        if not self.is_unlocked:
-            raise VaultStateError("Cannot change password while vault is locked.")
-        if not new_password or len(new_password) < 8:
-            raise ValueError("Master password must be at least 8 characters long.")
-
-        self._master_password = new_password
-        self.has_unsaved_changes = True
+        if not self.is_unlocked or self.db is None:
+            raise VaultStateError("Cannot change password on a locked vault.")
+        self.db.change_master_password(new_password)
+        self._has_unsaved_changes = True
+        self.save()

@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..usb import UsbManager
+from .i18n import tr
 
 
 class WelcomeView(QWidget):
@@ -101,7 +102,7 @@ class WelcomeView(QWidget):
         ))
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        tagline = QLabel("Your vault. Your device. Your control.")
+        tagline = QLabel("Seu cofre. Seu dispositivo. Seu controle.")
         tagline.setProperty("class", "tagline")
         tagline.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -110,8 +111,8 @@ class WelcomeView(QWidget):
         card_layout.addWidget(tagline)
 
         desc = QLabel(
-            "Clavis is a portable, offline-first password manager designed to keep "
-            "your encrypted vault physically with you on a USB drive."
+            "Clavis é um gerenciador local de senhas. Seu arquivo KDBX é criptografado "
+            "e pode ser armazenado em uma unidade USB ou em outro local escolhido."
         )
         desc.setWordWrap(True)
         desc.setStyleSheet("color: #9ca3af; font-size: 13px; line-height: 1.4;")
@@ -120,14 +121,14 @@ class WelcomeView(QWidget):
         card_layout.addSpacing(8)
 
         # USB Drive Selector
-        usb_label = QLabel("SELECT REMOVABLE STORAGE / USB DRIVE:")
+        usb_label = QLabel("UNIDADE REMOVÍVEL / LOCAL DE ARMAZENAMENTO:")
         usb_label.setStyleSheet("color: #d1d5db; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;")
         card_layout.addWidget(usb_label)
 
         drive_row = QHBoxLayout()
         self.drive_combo = QComboBox()
         self.drive_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
-        refresh_btn = QPushButton("Refresh")
+        refresh_btn = QPushButton("Atualizar")
         refresh_btn.setStyleSheet("background-color: #262933; color: #d1d5db; border: 1px solid #374151; padding: 8px 12px; border-radius: 6px;")
         refresh_btn.clicked.connect(self.refresh_drives)
 
@@ -138,11 +139,11 @@ class WelcomeView(QWidget):
         # Action Buttons
         card_layout.addSpacing(12)
         btn_layout = QHBoxLayout()
-        self.create_btn = QPushButton("Create New Vault on USB")
+        self.create_btn = QPushButton("Criar novo cofre")
         self.create_btn.setProperty("class", "primary")
         self.create_btn.clicked.connect(self._on_create)
 
-        self.open_btn = QPushButton("Open Existing Vault...")
+        self.open_btn = QPushButton("Abrir cofre existente...")
         self.open_btn.setProperty("class", "secondary")
         self.open_btn.clicked.connect(self._on_open)
 
@@ -152,8 +153,8 @@ class WelcomeView(QWidget):
 
         # Transparency Notice
         notice = QLabel(
-            "Security Notice: Physical USB storage isolates the vault from network vectors, "
-            "but host keyloggers or malware can still compromise unlocked credentials."
+            "A unidade USB não protege contra malware ou keyloggers no computador. "
+            "O cofre fica descriptografado em memória enquanto está desbloqueado."
         )
         notice.setWordWrap(True)
         notice.setStyleSheet("color: #6b7280; font-size: 11px; margin-top: 12px;")
@@ -170,13 +171,18 @@ class WelcomeView(QWidget):
             for d in drives:
                 self.drive_combo.addItem(d.display_name, userData=d.mount_point)
         else:
-            self.drive_combo.addItem("No removable USB drive detected (click to browse)", userData=None)
+            self.drive_combo.addItem(
+                tr("Nenhuma unidade USB detectada (clique para procurar)"),
+                userData=None,
+            )
 
     def _on_create(self):
         mount = self.drive_combo.currentData()
         if not mount:
             # Allow user to pick directory manually
-            directory = QFileDialog.getExistingDirectory(self, "Select USB Drive or Directory for New Vault")
+            directory = QFileDialog.getExistingDirectory(
+                self, tr("Escolha a pasta do novo cofre")
+            )
             if directory:
                 mount = directory
             else:
@@ -185,7 +191,7 @@ class WelcomeView(QWidget):
         default_path = os.path.join(mount, "clavis.vault")
         save_path, _ = QFileDialog.getSaveFileName(
             self,
-            "Create Clavis Encrypted Vault",
+            tr("Criar cofre KDBX do Clavis"),
             default_path,
             "Clavis Vault (*.vault)"
         )
@@ -195,7 +201,7 @@ class WelcomeView(QWidget):
     def _on_open(self):
         vault_file, _ = QFileDialog.getOpenFileName(
             self,
-            "Open Encrypted Clavis Vault",
+            tr("Abrir cofre KDBX do Clavis"),
             "",
             "Clavis Vault (*.vault);;All Files (*)"
         )

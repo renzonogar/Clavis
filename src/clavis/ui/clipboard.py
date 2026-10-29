@@ -16,6 +16,7 @@ class ClipboardAutoClear(QObject):
         super().__init__(parent)
         self._clipboard = QGuiApplication.clipboard()
         self._copied_text: Optional[str] = None
+        self._timeout_seconds = 30
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(30_000)
@@ -26,9 +27,20 @@ class ClipboardAutoClear(QObject):
             return False
         self._copied_text = password
         self._clipboard.setText(password)
-        self._timer.start()
+        if self._timeout_seconds > 0:
+            self._timer.start(self._timeout_seconds * 1000)
         self.copied.emit()
         return True
+
+    def set_timeout_seconds(self, seconds: int) -> None:
+        self._timeout_seconds = max(0, seconds)
+        self._timer.stop()
+        if self._timeout_seconds > 0 and self._copied_text is not None:
+            self._timer.start(self._timeout_seconds * 1000)
+
+    @property
+    def timeout_seconds(self) -> int:
+        return self._timeout_seconds
 
     def clear_if_unchanged(self) -> None:
         self._timer.stop()

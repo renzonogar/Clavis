@@ -19,10 +19,13 @@ if SRC_DIR not in sys.path:
 
 def main():
     try:
+        from PySide6.QtCore import QSettings
         from PySide6.QtWidgets import QApplication
         from PySide6.QtGui import QFont, QIcon
         from clavis.ui.main_window import MainWindow
+        from clavis.ui.ui_scale import configure_ui_scale_from_settings
 
+        configure_ui_scale_from_settings(QSettings("Clavis", "Clavis"))
         app = QApplication(sys.argv)
         app.setApplicationName("Clavis")
         app.setApplicationDisplayName("Clavis")

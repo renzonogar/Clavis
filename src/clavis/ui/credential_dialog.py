@@ -6,7 +6,7 @@ secure password generator and real-time strength estimation.
 
 from typing import Optional, Dict, Any
 
-from PySide6.QtCore import QEasingCurve, Qt, QParallelAnimationGroup, QPropertyAnimation, QRect
+from PySide6.QtCore import QEasingCurve, Qt, QParallelAnimationGroup, QPropertyAnimation, QRect, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -18,6 +18,7 @@ from clavis.ui.icons import load_icon
 
 from ..password_generator import PasswordGenerator, GeneratorOptions
 from .clipboard import ClipboardAutoClear
+from .i18n import apply_translations, set_translated_text, tr
 
 
 class CredentialDialog(QDialog):
@@ -33,8 +34,12 @@ class CredentialDialog(QDialog):
         self.existing_credential = existing_credential
         self.clipboard_auto_clear = clipboard_auto_clear or ClipboardAutoClear(self)
         is_editing = existing_credential is not None
-        self.setWindowTitle("Edit Credential" if is_editing else "New Credential")
+        self.setWindowTitle("Editar credencial" if is_editing else "Nova credencial")
         self._animation_group: Optional[QParallelAnimationGroup] = None
+        self._password_reveal_timer = QTimer(self)
+        self._password_reveal_timer.setSingleShot(True)
+        self._password_reveal_timer.setInterval(10_000)
+        self._password_reveal_timer.timeout.connect(self._hide_password)
         if is_editing:
             self.setModal(True)
             self.setWindowFlags(
@@ -54,6 +59,7 @@ class CredentialDialog(QDialog):
 
         if existing_credential:
             self._populate_fields(existing_credential)
+        apply_translations(self)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -100,7 +106,7 @@ class CredentialDialog(QDialog):
 
         self.setStyleSheet("""
             QDialog {
-                background-color: #1a1c23;
+                background-color: #0e1113;
                 color: #e5e7eb;
                 border: 2px solid #4a4a4a;
                 border-radius: 12px;
@@ -111,7 +117,7 @@ class CredentialDialog(QDialog):
                 font-weight: 500;
             }
             QLineEdit, QTextEdit {
-                background-color: #121316;
+                background-color: #08090a;
                 color: #f3f4f6;
                 border: 1px solid #374151;
                 border-radius: 6px;
@@ -119,14 +125,14 @@ class CredentialDialog(QDialog):
                 font-size: 13px;
             }
             QLineEdit:focus, QTextEdit:focus {
-                border-color: #6366f1;
+                border-color: #284cff;
             }
             QCheckBox {
                 color: #9ca3af;
                 font-size: 12px;
             }
             QPushButton.primary {
-                background-color: #4f46e5;
+                background-color: #284cff;
                 color: #ffffff;
                 border: none;
                 border-radius: 6px;
@@ -134,7 +140,7 @@ class CredentialDialog(QDialog):
                 font-weight: 600;
             }
             QPushButton.primary:hover {
-                background-color: #4338ca;
+                background-color: #1e3bd6;
             }
             QPushButton.secondary {
                 background-color: #262933;
@@ -147,7 +153,7 @@ class CredentialDialog(QDialog):
 
         form = QWidget()
         form.setObjectName("credentialForm")
-        form.setStyleSheet("background-color: #1a1c23;")
+        form.setStyleSheet("background-color: #0e1113;")
         form.setAutoFillBackground(True)
         form_layout = QVBoxLayout(form)
         form_layout.setSpacing(10)
@@ -157,26 +163,26 @@ class CredentialDialog(QDialog):
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         scroll_area.setStyleSheet(
-            "QScrollArea { background-color: #1a1c23; border: none; }"
+            "QScrollArea { background-color: #0e1113; border: none; }"
         )
-        scroll_area.viewport().setStyleSheet("background-color: #1a1c23;")
+        scroll_area.viewport().setStyleSheet("background-color: #0e1113;")
         scroll_area.setWidget(form)
         layout.addWidget(scroll_area, 1)
 
         # Title
-        form_layout.addWidget(QLabel("Title / Service Name *"))
+        form_layout.addWidget(QLabel("Serviço *"))
         self.title_input = QLineEdit()
-        self.title_input.setPlaceholderText("e.g. GitHub, ProtonMail, Bank")
+        self.title_input.setPlaceholderText("Ex.: e-mail, banco, trabalho")
         form_layout.addWidget(self.title_input)
 
         # Username
-        form_layout.addWidget(QLabel("Username / Email *"))
+        form_layout.addWidget(QLabel("Usuário / e-mail *"))
         self.username_input = QLineEdit()
-        self.username_input.setPlaceholderText("e.g. user@example.com")
+        self.username_input.setPlaceholderText("nome@exemplo.com")
         form_layout.addWidget(self.username_input)
 
         # Password Row
-        form_layout.addWidget(QLabel("Password *"))
+        form_layout.addWidget(QLabel("Senha *"))
         pw_row = QHBoxLayout()
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
@@ -185,12 +191,14 @@ class CredentialDialog(QDialog):
         self.toggle_pw_btn = QPushButton("")
         self.toggle_pw_btn.setFixedWidth(55)
         self.toggle_pw_btn.setProperty("class", "secondary")
+        self.toggle_pw_btn.setToolTip("Mostrar ou ocultar senha")
         self.toggle_pw_btn.clicked.connect(self._toggle_pw_visibility)
         self.toggle_pw_btn.setIcon(load_icon("reveal_on.svg"))
 
         self.copy_pw_btn = QPushButton("")
         self.copy_pw_btn.setFixedWidth(55)
         self.copy_pw_btn.setProperty("class", "secondary")
+        self.copy_pw_btn.setToolTip("Copiar senha")
         self.copy_pw_btn.clicked.connect(self._copy_password)
         self.copy_pw_btn.setIcon(load_icon("copy.svg"))
 
@@ -200,7 +208,7 @@ class CredentialDialog(QDialog):
         form_layout.addLayout(pw_row)
 
         # Strength Bar & Feedback
-        self.strength_label = QLabel("Strength: Empty")
+        self.strength_label = QLabel("Força: vazia")
         self.strength_label.setStyleSheet("color: #9ca3af; font-size: 11px;")
         form_layout.addWidget(self.strength_label)
 
@@ -211,9 +219,9 @@ class CredentialDialog(QDialog):
         gen_layout.setSpacing(8)
 
         gen_title_row = QHBoxLayout()
-        gen_title_label = QLabel("Password Generator (CSPRNG)")
-        gen_title_label.setStyleSheet("font-weight: 600; color: #a5b4fc;")
-        self.gen_btn = QPushButton("Generate New")
+        gen_title_label = QLabel("Gerador de senhas")
+        gen_title_label.setStyleSheet("font-weight: 600; color: #8ea1ff;")
+        self.gen_btn = QPushButton("Gerar")
         self.gen_btn.setProperty("class", "secondary")
         self.gen_btn.clicked.connect(self._generate_password)
 
@@ -224,11 +232,12 @@ class CredentialDialog(QDialog):
 
         # Length slider
         len_row = QHBoxLayout()
-        self.len_label = QLabel("Length: 20")
+        self.len_label = QLabel()
         self.len_slider = QSlider(Qt.Orientation.Horizontal)
         self.len_slider.setRange(8, 64)
         self.len_slider.setValue(20)
-        self.len_slider.valueChanged.connect(lambda v: self.len_label.setText(f"Length: {v}"))
+        self.len_slider.valueChanged.connect(self._update_length_label)
+        self._update_length_label(self.len_slider.value())
         len_row.addWidget(self.len_label)
         len_row.addWidget(self.len_slider, 1)
         gen_layout.addLayout(len_row)
@@ -243,7 +252,7 @@ class CredentialDialog(QDialog):
         self.chk_digits.setChecked(True)
         self.chk_symbols = QCheckBox("!@#$")
         self.chk_symbols.setChecked(True)
-        self.chk_ambiguous = QCheckBox("No Ambiguous")
+        self.chk_ambiguous = QCheckBox("Sem ambíguos")
         self.chk_ambiguous.setChecked(True)
 
         opts_row.addWidget(self.chk_upper)
@@ -256,25 +265,25 @@ class CredentialDialog(QDialog):
         form_layout.addWidget(gen_box)
 
         # URL
-        form_layout.addWidget(QLabel("Website URL (Optional)"))
+        form_layout.addWidget(QLabel("Endereço do site (opcional)"))
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("https://...")
         form_layout.addWidget(self.url_input)
 
         # Notes
-        form_layout.addWidget(QLabel("Notes (Optional)"))
+        form_layout.addWidget(QLabel("Anotações (opcional)"))
         self.notes_input = QTextEdit()
         self.notes_input.setMaximumHeight(80)
-        self.notes_input.setPlaceholderText("Recovery codes, security questions, notes...")
+        self.notes_input.setPlaceholderText("Anotações privadas...")
         form_layout.addWidget(self.notes_input)
 
         # Buttons
         btn_row = QHBoxLayout()
-        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn = QPushButton("Cancelar")
         self.cancel_btn.setProperty("class", "secondary")
         self.cancel_btn.clicked.connect(self.reject)
 
-        self.save_btn = QPushButton("Save Credential")
+        self.save_btn = QPushButton("Salvar credencial")
         self.save_btn.setProperty("class", "primary")
         self.save_btn.clicked.connect(self._on_save)
 
@@ -310,18 +319,29 @@ class CredentialDialog(QDialog):
         if self.password_input.echoMode() == QLineEdit.EchoMode.Password:
             self.password_input.setEchoMode(QLineEdit.EchoMode.Normal)
             self.toggle_pw_btn.setIcon(load_icon("reveal_off.svg"))
+            self._password_reveal_timer.start()
         else:
-            self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-            self.toggle_pw_btn.setIcon(load_icon("reveal_on.svg"))
+            self._hide_password()
+
+    def _hide_password(self):
+        self._password_reveal_timer.stop()
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.toggle_pw_btn.setIcon(load_icon("reveal_on.svg"))
 
     def _copy_password(self):
         self.clipboard_auto_clear.copy_password(self.password_input.text())
 
     def _on_password_copied(self):
-        self.copy_pw_btn.setText("Copied (30s)")
+        seconds = self.clipboard_auto_clear.timeout_seconds
+        if seconds == 0:
+            set_translated_text(self.copy_pw_btn, "Copiada")
+        else:
+            set_translated_text(
+                self.copy_pw_btn, "Copiada ({seconds}s)", seconds=seconds
+            )
 
     def _on_clipboard_timer_finished(self):
-        self.copy_pw_btn.setText("Copy")
+        set_translated_text(self.copy_pw_btn, "")
 
     def _on_password_changed(self, text: str):
         analysis = PasswordGenerator.estimate_strength(text)
@@ -334,9 +354,26 @@ class CredentialDialog(QDialog):
             "Very Strong": "#06b6d4"
         }
         color = colors.get(analysis["label"], "#9ca3af")
-        self.strength_label.setText(
-            f"Strength: <b style='color: {color}'>{analysis['label']}</b> "
-            f"({analysis['entropy_bits']} bits entropy)"
+        labels = {
+            "Empty": "Vazia",
+            "Very Weak": "Muito fraca",
+            "Weak": "Fraca",
+            "Fair": "Razoável",
+            "Strong": "Forte",
+            "Very Strong": "Muito forte",
+        }
+        set_translated_text(
+            self.strength_label,
+            "Força: <b style='color: {color}'>{label}</b> "
+            "({entropy} bits estimados)",
+            color=color,
+            label=labels[analysis["label"]],
+            entropy=analysis["entropy_bits"],
+        )
+
+    def _update_length_label(self, length: int):
+        set_translated_text(
+            self.len_label, "Tamanho: {length}", length=length
         )
 
     def _generate_password(self):
@@ -352,9 +389,10 @@ class CredentialDialog(QDialog):
             pw = PasswordGenerator.generate(opts)
             self.password_input.setText(pw)
             self.password_input.setEchoMode(QLineEdit.EchoMode.Normal)
-            self.toggle_pw_btn.setText("Hide")
-        except Exception as e:
-            QMessageBox.warning(self, "Generator Error", str(e))
+            self.toggle_pw_btn.setIcon(load_icon("reveal_off.svg"))
+            self._password_reveal_timer.start()
+        except ValueError as error:
+            QMessageBox.warning(self, tr("Erro no gerador"), tr(str(error)))
 
     def _on_save(self):
         title = self.title_input.text().strip()
@@ -362,13 +400,17 @@ class CredentialDialog(QDialog):
         password = self.password_input.text()
 
         if not title:
-            QMessageBox.warning(self, "Validation Error", "Title / Service Name is required.")
+            QMessageBox.warning(self, tr("Campo obrigatório"), tr("Informe o serviço."))
             return
         if not username:
-            QMessageBox.warning(self, "Validation Error", "Username / Email is required.")
+            QMessageBox.warning(
+                self, tr("Campo obrigatório"), tr("Informe o usuário ou e-mail.")
+            )
             return
         if not password:
-            QMessageBox.warning(self, "Validation Error", "Password cannot be blank.")
+            QMessageBox.warning(
+                self, tr("Campo obrigatório"), tr("A senha não pode ficar vazia.")
+            )
             return
 
         self.accept()

@@ -119,9 +119,10 @@ class SafeVaultStorage:
             if preserve_backup and os.path.exists(target_path):
                 try:
                     shutil.copy2(target_path, backup_path)
-                except Exception as b_err:
-                    # Non-fatal warning; continue with replacement
-                    pass
+                except OSError as backup_error:
+                    raise StorageError(
+                        f"Could not preserve the existing vault backup at '{backup_path}'."
+                    ) from backup_error
 
             # Atomic replace (POSIX atomic; Windows replaces atomically on NT 4.0+)
             os.replace(temp_path, target_path)
